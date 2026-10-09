@@ -1,0 +1,12 @@
+name = "ce-entebbe-membership"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ce_membership"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+migrations_dir = "migrations"
+
+# ADMIN_TOKEN is a secret: `npx wrangler secret put ADMIN_TOKEN`
+# For local dev put ADMIN_TOKEN=... in .dev.vars
