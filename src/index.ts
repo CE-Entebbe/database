@@ -6,7 +6,7 @@ import { memberPage, messagePage } from "./member-page";
 import { accountPage } from "./account-page";
 import { ICONS } from "./icons";
 import { IntegrationEnv, emailEnabled, googleEnabled, baseUrl, emailHtml, sendEmail, googleAuthUrl, googleExchange } from "./integrations";
-import { TITLES, MARITAL, normalizePhone, validDate, kampalaToday, nextOccurrence, displayName, parseBirth, birthIso, phoneOperator, type Birth } from "./people";
+import { TITLES, MARITAL, normalizePhone, validDate, kampalaToday, nextOccurrence, displayName, parseBirth, birthIso, phoneOperator, maskName, maskPhone, maskEmail, initials, memberSince, type Birth } from "./people";
 
 export type Env = IntegrationEnv & { DB: D1Database; ADMIN_TOKEN?: string; SESSION_SECRET?: string; PHOTOS?: R2Bucket };
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -381,20 +381,45 @@ app.get("/api/public/cells", async (c) => {
 });
 
 // Who already owns one of these contacts? Never reveals names — only which kind of contact clashed.
+type Preview = { id: number; email: string | null; phone: string | null; title: string | null; first_name: string | null; last_name: string | null;
+  name: string; created_at: string; church_name: string | null };
+const PREVIEW_SQL = `SELECT m.id, m.email, m.phone, m.title, m.first_name, m.last_name, m.name, m.created_at, ch.name AS church_name
+  FROM identifiers i JOIN members m ON m.id=i.member_id LEFT JOIN churches ch ON ch.id=m.church_id WHERE i.value=?`;
 async function existingAccount(db: D1Database, f: { phone?: string | null; phone_alt?: string | null; email?: string | null }) {
   for (const v of [f.email, f.phone, f.phone_alt]) {
     if (!v) continue;
-    const m = await first<{ id: number; email: string | null }>(db, "SELECT m.id, m.email FROM identifiers i JOIN members m ON m.id=i.member_id WHERE i.value=?", v);
+    const m = await first<Preview>(db, PREVIEW_SQL, v);
     if (m) return { field: v.includes("@") ? "email" : "phone", member: m };
   }
   return null;
 }
-function existsError(c: C, ex: { field: string; member: { email: string | null } }) {
+/** Summary of an existing account for "Is this you?": full name and photo, but phone/email stay masked. */
+async function previewOf(c: C, m: Preview, matched: string) {
+  const fn = m.first_name ?? m.name.split(" ")[0] ?? "", ln = m.last_name ?? m.name.split(" ").slice(1).join(" ");
+  const ph = await first<{ id: number }>(c.env.DB, "SELECT id FROM photos WHERE member_id=? AND relative_id IS NULL AND status='approved' ORDER BY id DESC LIMIT 1", m.id);
+  const photo = ph && c.env.SESSION_SECRET ? `/api/auth/preview-photo?t=${encodeURIComponent(await signToken(c.env.SESSION_SECRET, "pvphoto", { ph: ph.id }, 600))}` : null;
+  return { matched, initials: initials(fn, ln) || "?", title: m.title, name: [fn, ln].filter(Boolean).join(" "), photo,
+    masked_phone: maskPhone(m.phone), masked_email: maskEmail(m.email), church: m.church_name, member_since: memberSince(m.created_at) };
+}
+async function existsError(c: C, ex: { field: string; member: Preview }, withPreview = true) {
   return c.json({
     error: ex.field === "email" ? "An account with this email already exists" : "An account with this phone number already exists",
     code: "account_exists", field: ex.field, can_reset: emailEnabled(c.env) && !!ex.member.email,
+    preview: withPreview ? await previewOf(c, ex.member, ex.field) : null,
   }, 409);
 }
+// ----- simple fixed-window rate limit in D1 -----
+const clientIp = (c: C) => c.req.header("cf-connecting-ip") ?? c.req.header("x-forwarded-for")?.split(",")[0].trim() ?? "unknown";
+async function rateLimit(db: D1Database, key: string, limit: number, windowSec: number) {
+  const now = Math.floor(Date.now() / 1000), win = now - (now % windowSec);
+  const r = await first<{ count: number }>(db,
+    `INSERT INTO rate_limits(key, window_start, count) VALUES(?, ?, 1)
+     ON CONFLICT(key) DO UPDATE SET count = CASE WHEN window_start = excluded.window_start THEN count + 1 ELSE 1 END, window_start = excluded.window_start
+     RETURNING count`, key, win);
+  if (Math.random() < 0.02) await run(db, "DELETE FROM rate_limits WHERE window_start < ?", win - windowSec);
+  return (r?.count ?? 0) <= limit;
+}
+const CHECK_LIMIT = 20, CHECK_WINDOW = 600;
 type NewAccount = { password_hash: string | null; google_sub?: string | null; email_verified?: boolean };
 /** Shared by password sign-up and Google onboarding. Returns a Response on a duplicate, else the new member. */
 async function createAccount(c: C, b: Record<string, unknown>, acct: NewAccount) {
@@ -405,7 +430,7 @@ async function createAccount(c: C, b: Record<string, unknown>, acct: NewAccount)
   let cellId = intOrNull(b.cell_id, "cell_id");
   if (cellId) { if (!(await cellsEnabled(c.env.DB))) cellId = null; else await assertCellInChurch(c.env.DB, cellId, churchId); }
   const ex = await existingAccount(c.env.DB, f);
-  if (ex) return { response: existsError(c, ex) };
+  if (ex) return { response: await existsError(c, ex, await rateLimit(c.env.DB, "check:" + clientIp(c), CHECK_LIMIT, CHECK_WINDOW)) };
   // A number/email may already sit on someone's spouse record: that spouse is now signing up.
   const owner = await contactOwner(c.env.DB, [f.phone, f.phone_alt, f.email], {});
   let spouseRec: RelativeRow | null = null;
@@ -441,13 +466,24 @@ async function sendVerification(c: C, m: { id: number; email: string | null }) {
 const tooSoon = (ts: string | null) => !!ts && Date.now() - Date.parse(ts.replace(" ", "T") + "Z") < RESEND_COOLDOWN_SEC * 1000;
 
 app.get("/api/auth/config", (c) => c.json({ email: emailEnabled(c.env), google: googleEnabled(c.env) }));
+// Short-lived signed link to the matched account's approved photo (only issued inside an "Is this you?" answer).
+app.get("/api/auth/preview-photo", async (c) => {
+  const t = await readToken<{ ph: number }>(sessionSecret(c), "pvphoto", c.req.query("t"));
+  const ph = t && (await first<{ r2_key: string }>(c.env.DB, "SELECT r2_key FROM photos WHERE id=? AND status='approved'", t.ph));
+  if (!ph || !c.env.PHOTOS) return c.json({ error: "Not found" }, 404);
+  const obj = await c.env.PHOTOS.get(ph.r2_key);
+  if (!obj) return c.json({ error: "Not found" }, 404);
+  return new Response(obj.body, { headers: { "content-type": obj.httpMetadata?.contentType ?? "image/jpeg", "cache-control": "private, max-age=600", "x-content-type-options": "nosniff" } });
+});
 app.post("/api/auth/check", async (c) => {
+  if (!(await rateLimit(c.env.DB, "check:" + clientIp(c), CHECK_LIMIT, CHECK_WINDOW)))
+    return c.json({ error: "Too many checks. Please wait a few minutes and try again.", code: "rate_limited" }, 429);
   const b = await body(c);
   const phone = typeof b.phone === "string" && b.phone.trim() ? normalizePhone(b.phone) : null;
   const phone_alt = typeof b.phone_alt === "string" && b.phone_alt.trim() ? normalizePhone(b.phone_alt) : null;
   const email = typeof b.email === "string" && b.email.trim() ? b.email.trim().toLowerCase() : null;
   const ex = await existingAccount(c.env.DB, { phone, phone_alt, email });
-  return ex ? existsError(c, ex) : c.json({ ok: true });
+  return ex ? await existsError(c, ex) : c.json({ ok: true });
 });
 app.post("/api/auth/signup", async (c) => {
   const b = await body(c);
@@ -559,8 +595,9 @@ app.get("/auth/google/callback", async (c) => {
 app.get("/api/auth/google/pending", async (c) => {
   const p = await readToken<GPending>(sessionSecret(c), "gpending", getCookie(c, "ce_g"));
   if (!p) return c.json({ pending: null });
+  const ex = p.mode === "link" ? await existingAccount(c.env.DB, { email: p.email }) : null;
   return c.json({ pending: { email: p.email, given_name: p.given, family_name: p.family, mode: p.mode },
-    can_reset: emailEnabled(c.env) });
+    can_reset: emailEnabled(c.env), preview: ex ? await previewOf(c, ex.member, "email") : null });
 });
 app.post("/api/auth/google/cancel", (c) => { deleteCookie(c, "ce_g", { path: "/" }); return c.json({ ok: true }); });
 // Finishes onboarding for a brand-new Google user: confirmed name + the mandatory profile, then the account exists.

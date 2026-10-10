@@ -68,15 +68,30 @@ describe("feature flags", () => {
 });
 
 describe("'Is this you?' on duplicate sign-up", () => {
-  it("returns a structured, name-free answer for existing phone or email", async () => {
+  it("returns a structured preview (full name, masked contacts) for existing phone or email", async () => {
     await call("/api/auth/signup", { jar: {}, method: "POST", body: { ...base, first_name: "Grace", phone: "0772000001", email: "grace@x.com" } });
     const p = await call("/api/auth/check", { method: "POST", body: { phone: "+256 772 000 001" } });
     expect(p.status).toBe(409);
-    expect(p.json).toEqual({ error: "An account with this phone number already exists", code: "account_exists", field: "phone", can_reset: true });
+    expect(p.json).toMatchObject({ error: "An account with this phone number already exists", code: "account_exists", field: "phone", can_reset: true });
+    expect(p.json.preview).toEqual({ matched: "phone", initials: "GO", title: null, name: "Grace Okello", photo: null, masked_phone: "0772 ••• 001",
+      masked_email: "g•••@x•••.com", church: "CE Entebbe", member_since: expect.stringMatching(/^[A-Z][a-z]{2} \d{4}$/) });
+    expect(p.text).not.toContain("772000001"); expect(p.text).not.toContain("grace@");
     const e = await call("/api/auth/signup", { jar: {}, method: "POST", body: { ...base, first_name: "Other", phone: "0772999999", email: "GRACE@x.com" } });
     expect(e.json).toMatchObject({ code: "account_exists", field: "email" });
-    expect(e.text).not.toContain("Grace\""); expect(e.text).not.toContain("Okello");
+    expect(e.json.preview.name).toBe("Grace Okello"); expect(e.text).not.toContain("grace@x.com");
     expect((await call("/api/auth/check", { method: "POST", body: { phone: "0772123123", email: "new@x.com" } })).json).toEqual({ ok: true });
+  });
+});
+
+describe("rate limit on account lookups", () => {
+  it("allows 20 checks per IP per 10 minutes, then 429; other IPs unaffected", async () => {
+    const hit = (ip: string) => mf.dispatchFetch("http://ce.local/api/auth/check", { method: "POST",
+      headers: { "content-type": "application/json", "cf-connecting-ip": ip }, body: JSON.stringify({ phone: "0772000001" }) });
+    for (let i = 0; i < 20; i++) expect((await hit("9.9.9.9")).status).toBe(409);
+    const r = await hit("9.9.9.9");
+    expect(r.status).toBe(429);
+    expect((await r.json() as any).code).toBe("rate_limited");
+    expect((await hit("8.8.8.8")).status).toBe(409);
   });
 });
 
@@ -179,7 +194,7 @@ describe("Google sign-in", () => {
     const st = await start(j);
     googleClaims = { sub: "g-200", email: "grace@x.com", email_verified: true, given_name: "Grace" };
     expect((await call(`/auth/google/callback?code=good&state=${st}`, { jar: j })).location).toBe("/?google=link");
-    expect((await call("/api/auth/google/pending", { jar: j })).json).toMatchObject({ pending: { mode: "link", email: "grace@x.com" }, can_reset: true });
+    expect((await call("/api/auth/google/pending", { jar: j })).json).toMatchObject({ pending: { mode: "link", email: "grace@x.com" }, can_reset: true, preview: { matched: "email", masked_email: "g•••@x•••.com" } });
     expect((await call("/api/auth/google/complete", { jar: j, method: "POST", body: { first_name: "Fake", last_name: "Grace", birth_month: 1, birth_day: 1, phone: "0772555555", church_id: 1 } })).json.code).toBe("account_exists");
     const l = await call("/api/auth/login", { jar: j, method: "POST", body: { login: "grace@x.com", password: "brandnew1" } });
     expect(l.json).toEqual({ ok: true, google_linked: true });
@@ -193,5 +208,17 @@ describe("Google sign-in", () => {
     const st = await start(j);
     googleClaims = { sub: "g-300", email: "u@x.com", email_verified: false };
     expect((await call(`/auth/google/callback?code=good&state=${st}`, { jar: j })).location).toBe("/?google=unverified");
+  });
+});
+
+import { maskName, maskPhone, maskEmail, initials } from "../src/people";
+describe("masking helpers", () => {
+  it("masks names, phones and emails", () => {
+    expect(maskName("Christo", "Innocent")).toBe("C****** I*******");
+    expect(initials("christo", "innocent")).toBe("CI");
+    expect(maskPhone("256783335335")).toBe("0783 ••• 335");
+    expect(maskPhone("447700900123")).toBe("+4477 ••• 123");
+    expect(maskEmail("christo@gmail.com")).toBe("c•••@g•••.com");
+    expect(maskName("Al", null)).toBe("A*");
   });
 });

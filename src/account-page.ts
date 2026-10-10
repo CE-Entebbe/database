@@ -51,6 +51,7 @@ export const accountPage = () => `${head("CE Membership")}<body>
  </div>
  <div id="exists" class="stack" hidden>
   <div class="steplabel">Is this you?</div><h2 style="margin:0" id="exTitle"></h2>
+  <div id="exCard" class="acct-card" hidden></div>
   <p class="hint" id="exText"></p>
   <button class="btn primary block" onclick="exLogin()">Yes, log me in</button>
   <button class="btn block" id="exForgot" onclick="exForgot()">Yes, but I forgot my password</button>
@@ -174,9 +175,13 @@ let EX=null;
 function showExists(d,value,from){EX={...d,value,from};const em=d.field==="email";
  $("exTitle").textContent=em?"An account with this email already exists":"An account with this number already exists";
  $("exText").textContent=(d.from_google?"Your Google email is already registered. ":"")+"Is this your account?"+(d.from_google?" Log in once with your password and we'll connect Google to it.":"");
- $("exForgot").hidden=!d.can_reset;$("exNoReset").hidden=!!d.can_reset;$("exNo").hidden=true;$("exDiff").textContent=em?"Use a different email":"Use a different number";$("exDiff").hidden=!!d.from_google;panel("exists")}
+ $("exForgot").hidden=!CFG.email;$("exNoReset").hidden=true;$("exNoReset").textContent=CFG.email?"This account has no email address on file, so we can't send a reset link. Please ask your church admin to help you get back in.":"";
+ const pv=d.preview;$("exCard").hidden=!pv;if(pv)$("exCard").innerHTML='<div class="av" aria-hidden="true">'+(pv.photo?'<img src="'+h(pv.photo)+'" alt="">':h(pv.initials))+'</div><div class="ac-body"><div class="ac-name">'+h((pv.title?pv.title+" ":"")+pv.name)+'</div>'
+  +(pv.masked_phone?'<div class="ac-row"><span>Phone</span>'+h(pv.masked_phone)+(pv.matched==="phone"?' <span class="pill">matched</span>':"")+'</div>':"")
+  +(pv.masked_email?'<div class="ac-row"><span>Email</span>'+h(pv.masked_email)+(pv.matched==="email"?' <span class="pill">matched</span>':"")+'</div>':"")
+  +(pv.church?'<div class="ac-row"><span>Church</span>'+h(pv.church)+'</div>':"")+(pv.member_since?'<div class="ac-meta">Member since '+h(pv.member_since)+'</div>':"")+'</div>';$("exNo").hidden=true;$("exDiff").textContent=em?"Use a different email":"Use a different number";$("exDiff").hidden=!!d.from_google;panel("exists")}
 function exLogin(){panel("login");$("lLogin").value=EX.value||"";$("lPass").focus()}
-async function exForgot(){panel("forgot");$("fgLogin").value=EX.value||"";await sendForgot()}
+async function exForgot(){if(!EX.can_reset){$("exNoReset").hidden=false;return}panel("forgot");$("fgLogin").value=EX.value||"";await sendForgot()}
 function exDifferent(){panel("signup");setStep(2,true);const i=EX.field==="email"?$("sEmail"):$("sPhone");i.value="";i.focus();syncAlt()}
 async function exCancel(){if(EX&&EX.from_google){await api("/api/auth/google/cancel","POST",{});panel("login")}else{panel("signup")}}
 function openForgot(){panel("forgot");$("fgOn").hidden=!CFG.email;$("fgOff").hidden=CFG.email;$("fgDone").hidden=true;$("fgLogin").value=$("lLogin").value}
@@ -215,7 +220,7 @@ async function boot(){
   if(QS.get("reset")){RESET=QS.get("reset");QS.delete("reset");panel("reset");return}
   if(g==="new"||g==="link"){const r=await api("/api/auth/google/pending");GP=r.pending;
    if(GP&&GP.mode==="new"){$("gEmail").textContent=GP.email;$("gFirst").value=GP.given_name||"";$("gLast").value=GP.family_name||"";gBack();panel("gflow")}
-   else if(GP){showExists({field:"email",can_reset:r.can_reset,from_google:true},GP.email)}
+   else if(GP){showExists({field:"email",can_reset:r.can_reset&&!!(r.preview&&r.preview.masked_email),from_google:true,preview:r.preview},GP.email)}
    else toast("Your Google sign-in expired. Please try again.",true)}
   else if(g)toast({unavailable:"Google sign-in isn't available yet.",unverified:"Your Google email isn't verified.",inactive:"This account is inactive. Please contact your church admin."}[g]||"Google sign-in didn't complete. Please try again.",true);
   return}

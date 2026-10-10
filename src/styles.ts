@@ -124,6 +124,11 @@ nav.bottom button[aria-current=page]{background:var(--accent-soft)}nav.bottom bu
 .or{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:.8rem;margin:14px 0}.or:before,.or:after{content:"";flex:1;height:1px;background:var(--line)}
 .banner{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:var(--radius);background:var(--accent-soft);color:var(--accent-text);margin-bottom:14px}
 .banner .hint{color:var(--accent-text);opacity:.85}
+.acct-card{display:flex;gap:14px;align-items:flex-start;padding:14px;border:1.5px solid var(--line2);border-radius:var(--radius);background:var(--bg2)}
+.acct-card .av{flex:none;width:52px;height:52px;border-radius:50%;background:var(--grad);color:#fff;display:grid;place-items:center;font-weight:700;letter-spacing:.02em}
+.acct-card .ac-body{min-width:0;flex:1}.acct-card .av{overflow:hidden}.acct-card .av img{width:52px;height:52px;object-fit:cover;display:block}.acct-card .ac-name{font-weight:650;margin-bottom:4px}
+.acct-card .ac-row{display:flex;gap:8px;align-items:center;white-space:nowrap;font-size:.9rem;font-variant-numeric:tabular-nums}.acct-card .ac-row>span:first-child{color:var(--muted);width:56px;flex:none;font-size:.8rem}
+.acct-card .ac-meta{color:var(--muted);font-size:.8rem;margin-top:6px}
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 `;
 

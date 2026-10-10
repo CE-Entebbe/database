@@ -91,3 +91,25 @@ export function phoneOperator(p: string | null): "MTN" | "Airtel" | "Other" | nu
   if (/^7[045]/.test(n) || /^73[01]/.test(n) || /^20/.test(n)) return "Airtel"; // 070/074/075, 0730-0731, 020 fixed
   return "Other";
 }
+
+// ----- privacy-safe masking for the "Is this you?" preview -----
+const stars = (s: string) => (s ? s[0].toUpperCase() + "*".repeat(Math.max(s.length - 1, 1)) : "");
+export const maskName = (first: string | null, last: string | null) => [first, last].map((p) => stars((p ?? "").trim())).filter(Boolean).join(" ");
+export const initials = (first: string | null, last: string | null) => ((first ?? "").trim()[0] ?? "").toUpperCase() + ((last ?? "").trim()[0] ?? "").toUpperCase();
+export function maskPhone(p: string | null) {
+  if (!p) return null;
+  const local = p.startsWith("256") && p.length === 12 ? "0" + p.slice(3) : "+" + p;
+  return `${local.slice(0, local.startsWith("+") ? 5 : 4)} ••• ${local.slice(-3)}`;
+}
+export function maskEmail(e: string | null) {
+  if (!e || !e.includes("@")) return null;
+  const [user, domain] = e.split("@");
+  const dot = domain.lastIndexOf(".");
+  const name = dot > 0 ? domain.slice(0, dot) : domain, tld = dot > 0 ? domain.slice(dot) : "";
+  return `${user[0]}•••@${name[0]}•••${tld}`;
+}
+export function memberSince(createdAt: string | null) {
+  if (!createdAt) return null;
+  const d = new Date(createdAt.replace(" ", "T") + (createdAt.includes("Z") ? "" : "Z"));
+  return isNaN(+d) ? null : d.toLocaleDateString("en-GB", { month: "short", year: "numeric", timeZone: "Africa/Kampala" });
+}
