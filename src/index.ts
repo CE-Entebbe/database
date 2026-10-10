@@ -5,7 +5,8 @@ import { adminPage } from "./admin-page";
 import { memberPage, messagePage } from "./member-page";
 import { accountPage } from "./account-page";
 import { ICONS } from "./icons";
-import { IntegrationEnv, emailEnabled, googleEnabled, baseUrl, emailHtml, sendEmail, googleAuthUrl, googleExchange } from "./integrations";
+import { verifyEmail, resetEmail, welcomeEmail, type Recipient } from "./emails";
+import { IntegrationEnv, emailEnabled, googleEnabled, baseUrl, sendEmail, googleAuthUrl, googleExchange } from "./integrations";
 import { TITLES, MARITAL, normalizePhone, validDate, kampalaToday, nextOccurrence, displayName, parseBirth, birthIso, phoneOperator, maskName, maskPhone, maskEmail, initials, memberSince, type Birth } from "./people";
 
 export type Env = IntegrationEnv & { DB: D1Database; ADMIN_TOKEN?: string; SESSION_SECRET?: string; PHOTOS?: R2Bucket };
@@ -466,9 +467,11 @@ async function sendVerification(c: C, m: { id: number; email: string | null }) {
   const t = await signToken(sessionSecret(c), "verify", { m: m.id, e: m.email }, VERIFY_TTL);
   const link = `${baseUrl(c.env, c.req.url)}/auth/verify?t=${encodeURIComponent(t)}`;
   await run(c.env.DB, "UPDATE members SET verify_sent_at=datetime('now') WHERE id=?", m.id);
-  return sendEmail(c.env, m.email, "Confirm your email for CE Entebbe",
-    emailHtml("Confirm your email", "Tap the button below to confirm this email address for your CE Entebbe account. The link expires in 24 hours.", "Confirm email", link),
-    `Confirm your email for CE Entebbe (link valid 24 hours): ${link}`);
+  const mail = verifyEmail(await recipient(c.env.DB, m.id), link);
+  return sendEmail(c.env, m.email, mail.subject, mail.html, mail.text);
+}
+async function recipient(db: D1Database, id: number): Promise<Recipient> {
+  return (await first<Recipient>(db, "SELECT m.title, m.first_name, ch.name AS church FROM members m LEFT JOIN churches ch ON ch.id=m.church_id WHERE m.id=?", id)) ?? {};
 }
 /** true when the last send was less than the cooldown ago */
 const tooSoon = (ts: string | null) => !!ts && Date.now() - Date.parse(ts.replace(" ", "T") + "Z") < RESEND_COOLDOWN_SEC * 1000;
@@ -532,7 +535,11 @@ app.get("/auth/verify", async (c) => {
   const t = await readToken<{ m: number; e: string }>(sessionSecret(c), "verify", c.req.query("t"));
   const m = t && (await first<{ id: number; email: string | null }>(c.env.DB, "SELECT id, email FROM members WHERE id=?", t.m));
   if (!t || !m || (m.email ?? "").toLowerCase() !== t.e.toLowerCase()) return c.redirect("/?verified=invalid");
-  await run(c.env.DB, "UPDATE members SET email_verified_at=COALESCE(email_verified_at, datetime('now')) WHERE id=?", m.id);
+  const r = await run(c.env.DB, "UPDATE members SET email_verified_at=datetime('now') WHERE id=? AND email_verified_at IS NULL", m.id);
+  if (r.meta.changes && m.email) { // first confirmation only
+    const mail = welcomeEmail(await recipient(c.env.DB, m.id), baseUrl(c.env, c.req.url) + "/");
+    c.executionCtx.waitUntil(sendEmail(c.env, m.email, mail.subject, mail.html, mail.text).catch(() => false));
+  }
   return c.redirect("/?verified=1");
 });
 // Always answers the same way so it can't be used to discover accounts.
@@ -548,9 +555,8 @@ app.post("/api/auth/forgot", async (c) => {
     const t = await signToken(sessionSecret(c), "reset", { m: m.id, fp }, RESET_TTL);
     const link = `${baseUrl(c.env, c.req.url)}/?reset=${encodeURIComponent(t)}`;
     await run(c.env.DB, "UPDATE members SET reset_sent_at=datetime('now') WHERE id=?", m.id);
-    await sendEmail(c.env, m.email, "Reset your CE Entebbe password",
-      emailHtml("Reset your password", "Someone (hopefully you) asked to reset the password for your CE Entebbe account. The link works once and expires in 1 hour.", "Choose a new password", link),
-      `Reset your CE Entebbe password (valid 1 hour): ${link}`);
+    const mail = resetEmail(await recipient(c.env.DB, m.id), link);
+    await sendEmail(c.env, m.email, mail.subject, mail.html, mail.text);
   }
   return c.json({ ok: true, email_enabled: true });
 });

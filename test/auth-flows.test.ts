@@ -106,7 +106,9 @@ describe("email verification (Resend)", () => {
     const r = await call("/api/auth/signup", { jar: j, method: "POST", body: { ...base, first_name: "Ruth", phone: "0772000002", email: "ruth@x.com" } });
     expect(r.json).toMatchObject({ verification_sent: true });
     expect(sent).toHaveLength(1);
-    expect(sent[0]).toMatchObject({ to: ["ruth@x.com"], from: "CE <hello@ce.test>" });
+    expect(sent[0]).toMatchObject({ to: ["ruth@x.com"], from: "CE <hello@ce.test>", subject: "Confirm your email, Ruth" });
+    expect(sent[0].html).toContain("Hi Ruth,"); expect(sent[0].html).toContain("You received this because you signed up at CE Entebbe");
+    expect(sent[0].text).toContain("https://ce.example/auth/verify?t=");
     const link = linkIn(sent[0].html);
     expect(link.startsWith("https://ce.example/auth/verify?t=")).toBe(true);
     expect((await call("/api/me", { jar: j })).json.profile.email_verified).toBe(false);
@@ -114,6 +116,10 @@ describe("email verification (Resend)", () => {
     expect((await call("/auth/verify?t=garbage")).location).toBe("/?verified=invalid");
     const v = await call(link.replace("https://ce.example", ""));
     expect(v.location).toBe("/?verified=1");
+    await new Promise((r) => setTimeout(r, 50));
+    expect(sent.map((m) => m.subject)).toContain("Welcome to CE Entebbe, Ruth!");
+    const n = sent.length; await call(link.replace("https://ce.example", "")); await new Promise((r) => setTimeout(r, 50));
+    expect(sent.length).toBe(n); // welcome only once
     expect((await call("/api/me", { jar: j })).json.profile.email_verified).toBe(true);
     // changing email un-verifies and sends a new link
     sent.length = 0;
@@ -134,7 +140,8 @@ describe("password reset by email", () => {
     const known = await call("/api/auth/forgot", { method: "POST", body: { login: "0772000001" } });
     expect(unknown.json).toEqual(known.json);
     expect(sent).toHaveLength(1);
-    expect(sent[0].to).toEqual(["grace@x.com"]);
+    expect(sent[0]).toMatchObject({ to: ["grace@x.com"], subject: "Reset your CE Entebbe password" });
+    expect(sent[0].html).toContain("Hi Grace,");
     const token = decodeURIComponent(linkIn(sent[0].html).split("reset=")[1]);
     await call("/api/auth/forgot", { method: "POST", body: { login: "grace@x.com" } });
     expect(sent).toHaveLength(1); // rate-limited
