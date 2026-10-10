@@ -29,6 +29,17 @@ const bad = (m: string) => new HttpError(400, m);
 const notFound = (m = "Not found") => new HttpError(404, m);
 
 const app = new Hono<{ Bindings: Env }>();
+// Host split: members use members.ceentebbe.online, admins use app.ceentebbe.online/admin. workers.dev and other hosts serve everything.
+const MEMBERS_HOST = "members.ceentebbe.online", ADMIN_HOST = "app.ceentebbe.online";
+const isAdminPath = (p: string) => p === "/admin" || p.startsWith("/admin/") || p.startsWith("/api/admin");
+const isSharedAsset = (p: string) => /^\/(icon[\w-]*\.(png|svg)|sw\.js|manifest\.webmanifest)$/.test(p);
+app.use("*", async (c, next) => {
+  const u = new URL(c.req.url);
+  const to = (host: string) => c.redirect(`https://${host}${u.pathname}${u.search}`, c.req.method === "GET" || c.req.method === "HEAD" ? 301 : 308);
+  if (u.hostname === ADMIN_HOST && !isAdminPath(u.pathname) && !isSharedAsset(u.pathname)) return to(MEMBERS_HOST);
+  if (u.hostname === MEMBERS_HOST && isAdminPath(u.pathname)) return to(ADMIN_HOST);
+  await next();
+});
 
 app.onError((err, c) => {
   if (err instanceof HttpError) return c.json({ error: err.message }, err.status as 400);

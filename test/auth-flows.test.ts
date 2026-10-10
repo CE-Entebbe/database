@@ -263,3 +263,20 @@ describe("admin login page", () => {
     expect((await mf.dispatchFetch("http://ce.local/admin/login", { method: "POST", headers: { "content-type": "application/json", "cf-connecting-ip": "6.6.6.6" }, body: JSON.stringify({ code: "t" }) })).status).toBe(200);
   });
 });
+
+describe("host split", () => {
+  const at = (url: string, method = "GET") => mf.dispatchFetch(url, { method, redirect: "manual", headers: method === "POST" ? { "content-type": "application/json" } : {}, body: method === "POST" ? "{}" : undefined });
+  it("redirects member pages off app., admin off members., keeps assets and other hosts", async () => {
+    let r = await at("https://app.ceentebbe.online/?reset=abc");
+    expect(r.status).toBe(301); expect(r.headers.get("location")).toBe("https://members.ceentebbe.online/?reset=abc");
+    r = await at("https://app.ceentebbe.online/api/auth/login", "POST");
+    expect(r.status).toBe(308); expect(r.headers.get("location")).toBe("https://members.ceentebbe.online/api/auth/login");
+    expect((await at("https://app.ceentebbe.online/admin/login")).status).toBe(200);
+    expect((await at("https://app.ceentebbe.online/icon-192.png")).status).toBe(200);
+    r = await at("https://members.ceentebbe.online/admin");
+    expect(r.status).toBe(301); expect(r.headers.get("location")).toBe("https://app.ceentebbe.online/admin");
+    expect((await at("https://members.ceentebbe.online/api/admin/churches")).headers.get("location")).toBe("https://app.ceentebbe.online/api/admin/churches");
+    expect((await at("https://members.ceentebbe.online/")).status).toBe(200);
+    expect((await at("https://ce-entebbe-membership.doxalight-inc.workers.dev/admin/login")).status).toBe(200);
+  });
+});

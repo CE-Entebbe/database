@@ -3,7 +3,10 @@ main = "src/index.ts"
 compatibility_date = "2025-09-01"
 
 workers_dev = true
-routes = [{ pattern = "app.ceentebbe.online", custom_domain = true }]
+routes = [
+  { pattern = "app.ceentebbe.online", custom_domain = true },
+  { pattern = "members.ceentebbe.online", custom_domain = true },
+]
 
 [[d1_databases]]
 binding = "DB"
