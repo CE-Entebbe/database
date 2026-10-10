@@ -5,7 +5,7 @@ compatibility_date = "2025-09-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "ce_membership"
-database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+database_id = "a9bbc41a-d52b-445b-86f6-dd5483c63668"
 migrations_dir = "migrations"
 
 # ADMIN_TOKEN is a secret: `npx wrangler secret put ADMIN_TOKEN`
