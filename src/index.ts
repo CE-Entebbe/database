@@ -409,7 +409,15 @@ async function existsError(c: C, ex: { field: string; member: Preview }, withPre
   }, 409);
 }
 // ----- simple fixed-window rate limit in D1 -----
-const clientIp = (c: C) => c.req.header("cf-connecting-ip") ?? c.req.header("x-forwarded-for")?.split(",")[0].trim() ?? "unknown";
+/** Client key for rate limits: the IPv4 address, or the /64 prefix for IPv6 (one subscriber usually owns a whole /64). */
+function clientIp(c: C) {
+  const ip = c.req.header("cf-connecting-ip") ?? c.req.header("x-forwarded-for")?.split(",")[0].trim() ?? "unknown";
+  if (!ip.includes(":")) return ip;
+  const [head, tail = ""] = ip.split("::");
+  const h = head ? head.split(":") : [], t = tail ? tail.split(":") : [];
+  const full = ip.includes("::") ? [...h, ...Array(8 - h.length - t.length).fill("0"), ...t] : ip.split(":");
+  return full.slice(0, 4).map((x) => x.toLowerCase().replace(/^0+(?=.)/, "")).join(":") + "::/64";
+}
 async function rateLimit(db: D1Database, key: string, limit: number, windowSec: number) {
   const now = Math.floor(Date.now() / 1000), win = now - (now % windowSec);
   const r = await first<{ count: number }>(db,

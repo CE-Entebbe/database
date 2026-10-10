@@ -92,6 +92,10 @@ describe("rate limit on account lookups", () => {
     expect(r.status).toBe(429);
     expect((await r.json() as any).code).toBe("rate_limited");
     expect((await hit("8.8.8.8")).status).toBe(409);
+    // IPv6 is limited per /64, so rotating the interface id doesn't help
+    for (let i = 0; i < 20; i++) expect((await hit(`2001:db8:1:2::${i.toString(16)}`)).status).toBe(409);
+    expect((await hit("2001:db8:1:2:abcd::99")).status).toBe(429);
+    expect((await hit("2001:db8:1:3::1")).status).toBe(409);
   });
 });
 
