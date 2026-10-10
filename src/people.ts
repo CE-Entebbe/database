@@ -44,3 +44,40 @@ export function nextOccurrence(date: string, today: string): { date: string; day
 
 export const displayName = (title: string | null, first: string | null, fallback: string) =>
   [title, first].filter(Boolean).join(" ") || fallback;
+
+export type Birth = { birth_month: number | null; birth_day: number | null; birth_year: number | null };
+const DAYS = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+/** Validate month/day (required as a pair) + optional year. Accepts legacy `dob` (YYYY-MM-DD). Throws Error(message). */
+export function parseBirth(b: Record<string, unknown>, cur: Birth | null, required: boolean, today: string): Birth {
+  const has = (k: string) => b[k] !== undefined;
+  if (typeof b.dob === "string" && b.dob && !has("birth_month")) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(b.dob);
+    if (!m) throw new Error("Please enter a valid date of birth");
+    b = { birth_year: m[1], birth_month: m[2], birth_day: m[3] };
+  } else if (!has("birth_month") && !has("birth_day") && !has("birth_year")) {
+    const keep = cur ?? { birth_month: null, birth_day: null, birth_year: null };
+    if (required && !keep.birth_month) throw new Error("Birthday (month and day) is required");
+    return keep;
+  }
+  const num = (v: unknown) => (v === undefined || v === null || v === "" ? null : Number(v));
+  const month = num(b.birth_month), day = num(b.birth_day), year = num(b.birth_year);
+  if (month === null && day === null) {
+    if (required) throw new Error("Birthday (month and day) is required");
+    if (year !== null) throw new Error("Please choose the birthday month and day");
+    return { birth_month: null, birth_day: null, birth_year: null };
+  }
+  if (!Number.isInteger(month) || !Number.isInteger(day) || month! < 1 || month! > 12) throw new Error("Please choose the birthday month and day");
+  if (day! < 1 || day! > DAYS[month! - 1]) throw new Error("That day doesn't exist in the chosen month");
+  if (year !== null) {
+    const ty = Number(today.slice(0, 4));
+    if (!Number.isInteger(year) || year < 1900 || year > ty) throw new Error("Please enter a valid birth year");
+    const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+    if (month === 2 && day === 29 && !leap) throw new Error(`${year} was not a leap year`);
+    const iso = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    if (iso > today) throw new Error("Birthday can't be in the future");
+  }
+  return { birth_month: month, birth_day: day, birth_year: year };
+}
+/** Sortable/occurrence key; unknown year uses leap year 2000 so Feb 29 is representable. */
+export const birthIso = (r: Birth) => r.birth_month && r.birth_day
+  ? `${r.birth_year ?? 2000}-${String(r.birth_month).padStart(2, "0")}-${String(r.birth_day).padStart(2, "0")}` : null;

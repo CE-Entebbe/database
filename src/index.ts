@@ -4,7 +4,7 @@ import { hashPassword, verifyPassword, signSession, readSession, fingerprint, SE
 import { adminPage } from "./admin-page";
 import { memberPage, messagePage } from "./member-page";
 import { accountPage } from "./account-page";
-import { TITLES, MARITAL, normalizePhone, validDate, kampalaToday, nextOccurrence, displayName } from "./people";
+import { TITLES, MARITAL, normalizePhone, validDate, kampalaToday, nextOccurrence, displayName, parseBirth, birthIso, type Birth } from "./people";
 
 export type Env = { DB: D1Database; ADMIN_TOKEN?: string; SESSION_SECRET?: string; PHOTOS?: R2Bucket };
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -114,9 +114,9 @@ async function memberCells(db: D1Database, churchId: number) {
      WHERE p.church_id=? AND c.active=1 AND p.active=1 ORDER BY c.name`, churchId);
 }
 
-const PUBLIC_COLS = "id, church_id, name, title, first_name, last_name, phone, email, dob, marital_status, anniversary, has_kids, cell_id, access_code, active";
+const PUBLIC_COLS = "id, church_id, name, title, first_name, last_name, phone, email, birth_month, birth_day, birth_year, marital_status, anniversary, has_kids, cell_id, access_code, active";
 type MemberRow = { id: number; church_id: number; name: string; title: string | null; first_name: string | null;
-  last_name: string | null; phone: string | null; email: string | null; dob: string | null; marital_status: string | null;
+  last_name: string | null; phone: string | null; email: string | null; birth_month: number | null; birth_day: number | null; birth_year: number | null; marital_status: string | null;
   anniversary: string | null; has_kids: number; password_hash: string | null; cell_id: number | null; active: number; access_code: string };
 
 /** Validate member detail fields. `cur` = existing row for partial updates; `strict` = public registration rules. */
@@ -145,8 +145,9 @@ function memberFields(b: Record<string, unknown>, cur: MemberRow | null, strict:
   }
   const email = has("email") ? str(b.email, "email", false) : cur?.email ?? null;
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw bad("Please enter a valid email");
-  let dob = has("dob") ? str(b.dob, "Date of birth", strict) : cur?.dob ?? null;
-  if (dob && !validDate(dob, today)) throw bad("Please enter a valid date of birth");
+  let birth: Birth;
+  try { birth = parseBirth(b, cur, strict, today); } catch (e) { throw bad((e as Error).message); }
+  const dob = birth.birth_year ? birthIso(birth) : null;
   let marital_status = has("marital_status") ? (b.marital_status ? String(b.marital_status) : null) : cur?.marital_status ?? null;
   if (marital_status && !(MARITAL as readonly string[]).includes(marital_status)) throw bad("Invalid marital status");
   let anniversary = has("anniversary") ? str(b.anniversary, "Wedding anniversary", false) : cur?.anniversary ?? null;
@@ -155,7 +156,7 @@ function memberFields(b: Record<string, unknown>, cur: MemberRow | null, strict:
   if (anniversary && dob && anniversary <= dob) throw bad("Wedding date must be after date of birth");
   const has_kids = has("has_kids") ? (bool(b.has_kids) ?? 0) : cur?.has_kids ?? 0;
   const name = [first_name, last_name].filter(Boolean).join(" ");
-  return { has_kids, name, title, first_name, last_name, phone, email, dob, marital_status, anniversary };
+  return { has_kids, name, title, first_name, last_name, phone, email, ...birth, marital_status, anniversary };
 }
 async function assertPhoneFree(db: D1Database, phone: string | null, exceptId: number | null) {
   if (!phone) return;
@@ -178,7 +179,7 @@ async function savePhoto(env: Env, f: unknown): Promise<string | null> {
 }
 
 // ---------- shared: family + photos ----------
-type RelativeRow = { id: number; member_id: number; relation: "spouse" | "child"; title: string | null; first_name: string; last_name: string | null; dob: string | null };
+type RelativeRow = Birth & { id: number; member_id: number; relation: "spouse" | "child"; title: string | null; first_name: string; last_name: string | null };
 function relativeFields(b: Record<string, unknown>, cur: RelativeRow | null) {
   const relation = (cur?.relation ?? b.relation) as string;
   if (relation !== "spouse" && relation !== "child") throw bad("relation must be spouse or child");
@@ -189,9 +190,9 @@ function relativeFields(b: Record<string, unknown>, cur: RelativeRow | null) {
   let title = has("title") ? (b.title === "" || b.title === "None" || b.title == null ? null : String(b.title)) : cur?.title ?? null;
   if (relation === "child") title = null;
   if (title !== null && !(TITLES as readonly string[]).includes(title)) throw bad("Invalid title");
-  const dob = has("dob") ? str(b.dob, "Date of birth", false) : cur?.dob ?? null;
-  if (dob && !validDate(dob, kampalaToday())) throw bad("Please enter a valid date of birth");
-  return { relation, title, first_name, last_name, dob };
+  let birth: Birth;
+  try { birth = parseBirth(b, cur, relation === "child" && !cur, kampalaToday()); } catch (e) { throw bad((e as Error).message); }
+  return { relation, title, first_name, last_name, ...birth };
 }
 async function addRelative(db: D1Database, memberId: number, b: Record<string, unknown>) {
   const f = relativeFields(b, null);
@@ -204,12 +205,12 @@ async function addRelative(db: D1Database, memberId: number, b: Record<string, u
     if ((n?.n ?? 0) >= 20) throw bad("Too many children");
     await run(db, "UPDATE members SET has_kids=1 WHERE id=?", memberId);
   }
-  return first(db, "INSERT INTO relatives(member_id,relation,title,first_name,last_name,dob) VALUES(?,?,?,?,?,?) RETURNING *",
-    memberId, f.relation, f.title, f.first_name, f.last_name, f.dob);
+  return first(db, "INSERT INTO relatives(member_id,relation,title,first_name,last_name,birth_month,birth_day,birth_year) VALUES(?,?,?,?,?,?,?,?) RETURNING *",
+    memberId, f.relation, f.title, f.first_name, f.last_name, f.birth_month, f.birth_day, f.birth_year);
 }
 async function updateRelative(db: D1Database, cur: RelativeRow, b: Record<string, unknown>) {
   const f = relativeFields(b, cur);
-  return first(db, "UPDATE relatives SET title=?, first_name=?, last_name=?, dob=? WHERE id=? RETURNING *", f.title, f.first_name, f.last_name, f.dob, cur.id);
+  return first(db, "UPDATE relatives SET title=?, first_name=?, last_name=?, birth_month=?, birth_day=?, birth_year=? WHERE id=? RETURNING *", f.title, f.first_name, f.last_name, f.birth_month, f.birth_day, f.birth_year, cur.id);
 }
 async function deleteRelative(env: Env, rel: RelativeRow) {
   const ph = await all<{ r2_key: string }>(env.DB, "SELECT r2_key FROM photos WHERE relative_id=?", rel.id);
@@ -282,9 +283,9 @@ app.post("/api/auth/signup", async (c) => {
   if (f.email && (await first(c.env.DB, "SELECT id FROM members WHERE lower(email)=lower(?)", f.email))) throw new HttpError(409, "This email is already registered");
   const password_hash = await hashPassword(password);
   const m = await first<{ id: number; password_hash: string }>(c.env.DB,
-    `INSERT INTO members(church_id,name,title,first_name,last_name,phone,email,dob,marital_status,anniversary,has_kids,cell_id,access_code,password_hash)
-     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id, password_hash`,
-    churchId, f.name, f.title, f.first_name, f.last_name, f.phone, f.email, f.dob, f.marital_status ?? "single", f.anniversary, f.has_kids, cellId, newAccessCode(), password_hash);
+    `INSERT INTO members(church_id,name,title,first_name,last_name,phone,email,birth_month,birth_day,birth_year,marital_status,anniversary,has_kids,cell_id,access_code,password_hash)
+     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id, password_hash`,
+    churchId, f.name, f.title, f.first_name, f.last_name, f.phone, f.email, f.birth_month, f.birth_day, f.birth_year, f.marital_status ?? "single", f.anniversary, f.has_kids, cellId, newAccessCode(), password_hash);
   await startSession(c, m!);
   return c.json({ ok: true }, 201);
 });
@@ -311,13 +312,13 @@ me.get("/", async (c) => {
   const church = await first<{ name: string }>(c.env.DB, "SELECT name FROM churches WHERE id=?", m.church_id);
   const cell = enabled && m.cell_id ? await first<{ id: number; name: string }>(c.env.DB, "SELECT id, name FROM cells WHERE id=?", m.cell_id) : null;
   return c.json({
-    profile: { title: m.title, first_name: m.first_name, last_name: m.last_name, phone: m.phone, email: m.email, dob: m.dob,
+    profile: { title: m.title, first_name: m.first_name, last_name: m.last_name, phone: m.phone, email: m.email, birth_month: m.birth_month, birth_day: m.birth_day, birth_year: m.birth_year,
       marital_status: m.marital_status ?? "single", anniversary: m.anniversary, has_kids: !!m.has_kids, church_id: m.church_id,
       church_name: church?.name, cell_id: enabled ? m.cell_id : null, cell_name: cell?.name ?? null,
       display_name: displayName(m.title, m.first_name, m.name) },
     cells_enabled: enabled,
     cells: enabled ? await memberCells(c.env.DB, m.church_id) : [],
-    relatives: await all(c.env.DB, "SELECT id, relation, title, first_name, last_name, dob FROM relatives WHERE member_id=? ORDER BY relation DESC, dob", m.id),
+    relatives: await all(c.env.DB, "SELECT id, relation, title, first_name, last_name, birth_month, birth_day, birth_year FROM relatives WHERE member_id=? ORDER BY relation DESC, birth_year, birth_month, birth_day", m.id),
     photos: await all(c.env.DB, "SELECT id, relative_id, status, created_at FROM photos WHERE member_id=? ORDER BY id DESC", m.id),
   });
 });
@@ -325,7 +326,7 @@ me.patch("/", async (c) => {
   const m = c.get("member"); const b = await body(c);
   for (const k of ["church_id", "access_code", "password_hash", "active"]) delete b[k]; // members can't move church themselves
   const f = memberFields(b, m, false);
-  if (!f.dob) throw bad("Date of birth is required");
+  if (!f.birth_month) throw bad("Birthday (month and day) is required");
   await assertPhoneFree(c.env.DB, f.phone, m.id);
   if (f.email && (await first(c.env.DB, "SELECT id FROM members WHERE lower(email)=lower(?) AND id<>?", f.email, m.id))) throw new HttpError(409, "This email is already registered");
   let cellId = m.cell_id;
@@ -334,8 +335,8 @@ me.patch("/", async (c) => {
     cellId = intOrNull(b.cell_id, "cell_id");
     if (cellId) await assertCellInChurch(c.env.DB, cellId, m.church_id);
   }
-  await run(c.env.DB, `UPDATE members SET name=?, title=?, first_name=?, last_name=?, phone=?, email=?, dob=?, marital_status=?, anniversary=?, has_kids=?, cell_id=? WHERE id=?`,
-    f.name, f.title, f.first_name, f.last_name, f.phone, f.email, f.dob, f.marital_status ?? "single", f.anniversary, f.has_kids, cellId, m.id);
+  await run(c.env.DB, `UPDATE members SET name=?, title=?, first_name=?, last_name=?, phone=?, email=?, birth_month=?, birth_day=?, birth_year=?, marital_status=?, anniversary=?, has_kids=?, cell_id=? WHERE id=?`,
+    f.name, f.title, f.first_name, f.last_name, f.phone, f.email, f.birth_month, f.birth_day, f.birth_year, f.marital_status ?? "single", f.anniversary, f.has_kids, cellId, m.id);
   await applyMaritalSideEffects(c.env, m.id, f.marital_status ?? "single");
   return c.json({ ok: true });
 });
@@ -527,7 +528,7 @@ app.patch(`${A}/cells/:id`, async (c) => {
 });
 
 // members
-const MEMBER_SELECT = `SELECT m.id, m.church_id, m.name, m.title, m.first_name, m.last_name, m.phone, m.email, m.dob,
+const MEMBER_SELECT = `SELECT m.id, m.church_id, m.name, m.title, m.first_name, m.last_name, m.phone, m.email, m.birth_month, m.birth_day, m.birth_year,
   m.marital_status, m.anniversary, m.has_kids, m.cell_id, m.access_code, m.active, m.created_at,
   (m.password_hash IS NOT NULL) AS has_account, c.name AS cell_name, p.id AS pcf_id, p.name AS pcf_name, ch.name AS church_name
   FROM members m JOIN churches ch ON ch.id=m.church_id
@@ -543,7 +544,7 @@ app.get(`${A}/members/:id`, async (c) => {
   const m = await first(c.env.DB, `${MEMBER_SELECT} WHERE m.id=?`, id);
   if (!m) throw notFound();
   return c.json({ ...m, roles: await all(c.env.DB, "SELECT * FROM member_roles WHERE member_id=?", id),
-    relatives: await all(c.env.DB, "SELECT * FROM relatives WHERE member_id=? ORDER BY relation DESC, dob", id),
+    relatives: await all(c.env.DB, "SELECT * FROM relatives WHERE member_id=? ORDER BY relation DESC, birth_year, birth_month, birth_day", id),
     photos: await all(c.env.DB, "SELECT id, relative_id, status, source, created_at FROM photos WHERE member_id=? ORDER BY id DESC", id),
     coordinator_churches: await all(c.env.DB, "SELECT church_id FROM coordinator_churches WHERE member_id=?", id) });
 });
@@ -556,9 +557,9 @@ app.post(`${A}/members`, async (c) => {
   const f = memberFields(b, null, false);
   await assertPhoneFree(c.env.DB, f.phone, null);
   return c.json(await first(c.env.DB,
-    `INSERT INTO members(church_id,name,title,first_name,last_name,phone,email,dob,marital_status,anniversary,has_kids,cell_id,access_code)
-     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING ${PUBLIC_COLS}`,
-    churchId, f.name, f.title, f.first_name, f.last_name, f.phone, f.email, f.dob, f.marital_status, f.anniversary, f.has_kids, cellId, newAccessCode()), 201);
+    `INSERT INTO members(church_id,name,title,first_name,last_name,phone,email,birth_month,birth_day,birth_year,marital_status,anniversary,has_kids,cell_id,access_code)
+     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING ${PUBLIC_COLS}`,
+    churchId, f.name, f.title, f.first_name, f.last_name, f.phone, f.email, f.birth_month, f.birth_day, f.birth_year, f.marital_status, f.anniversary, f.has_kids, cellId, newAccessCode()), 201);
 });
 app.patch(`${A}/members/:id`, async (c) => {
   const id = idParam(c); const b = await body(c);
@@ -573,9 +574,9 @@ app.patch(`${A}/members/:id`, async (c) => {
   const f = memberFields(b, cur, false);
   await assertPhoneFree(c.env.DB, f.phone, id);
   return c.json(await first(c.env.DB,
-    `UPDATE members SET church_id=?, name=?, title=?, first_name=?, last_name=?, phone=?, email=?, dob=?, marital_status=?,
+    `UPDATE members SET church_id=?, name=?, title=?, first_name=?, last_name=?, phone=?, email=?, birth_month=?, birth_day=?, birth_year=?, marital_status=?,
      anniversary=?, has_kids=?, cell_id=?, active=? WHERE id=? RETURNING ${PUBLIC_COLS}`,
-    churchId, f.name, f.title, f.first_name, f.last_name, f.phone, f.email, f.dob, f.marital_status, f.anniversary,
+    churchId, f.name, f.title, f.first_name, f.last_name, f.phone, f.email, f.birth_month, f.birth_day, f.birth_year, f.marital_status, f.anniversary,
     f.has_kids, cellId, bool(b.active) ?? cur.active, id));
 });
 // family (admin)
@@ -628,7 +629,7 @@ app.get(`${A}/celebrations`, async (c) => {
   const where = churchId ? "AND m.church_id=?" : "";
   const args = churchId ? [churchId] : [];
   const members = await all<MemberRow & { church_name: string }>(c.env.DB,
-    `SELECT m.id, m.name, m.title, m.first_name, m.dob, m.marital_status, m.anniversary, m.phone, m.church_id, ch.name AS church_name
+    `SELECT m.id, m.name, m.title, m.first_name, m.birth_month, m.birth_day, m.birth_year, m.marital_status, m.anniversary, m.phone, m.church_id, ch.name AS church_name
      FROM members m JOIN churches ch ON ch.id=m.church_id WHERE m.active=1 ${where}`, ...args);
   const rels = await all<RelativeRow>(c.env.DB,
     `SELECT r.* FROM relatives r JOIN members m ON m.id=r.member_id WHERE m.active=1 ${where}`, ...args);
@@ -649,7 +650,7 @@ app.get(`${A}/celebrations`, async (c) => {
   for (const m of members) {
     const name = displayName(m.title, m.first_name, m.name);
     const base = { member_id: m.id, church_name: m.church_name, phone: m.phone };
-    if (m.dob) { const o = occ(m.dob); if (keep(o)) items.push({ ...base, type: "birthday", who: "member", relative_id: null, display_name: name, context: null, photo_ids: photosOf(m.id, null), ...rel(o) }); }
+    const mb = birthIso(m); if (mb) { const o = occ(mb); if (keep(o)) items.push({ ...base, type: "birthday", who: "member", relative_id: null, display_name: name, context: null, photo_ids: photosOf(m.id, null), ...rel(o), years: m.birth_year ? o.years : null }); }
     if (m.marital_status === "married" && m.anniversary) {
       const o = occ(m.anniversary);
       if (keep(o)) {
@@ -661,12 +662,12 @@ app.get(`${A}/celebrations`, async (c) => {
     }
   }
   for (const r of rels) {
-    const m = byId.get(r.member_id); if (!m || !r.dob) continue;
-    const o = occ(r.dob); if (!keep(o)) continue;
+    const m = byId.get(r.member_id); const rb = birthIso(r); if (!m || !rb) continue;
+    const o = occ(rb); if (!keep(o)) continue;
     const parent = displayName(m.title, m.first_name, m.name);
     items.push({ member_id: m.id, church_name: m.church_name, phone: m.phone, type: "birthday", who: r.relation, relative_id: r.id,
       display_name: r.relation === "child" ? r.first_name : displayName(r.title, r.first_name, r.first_name),
-      context: r.relation === "child" ? `Child of ${parent}` : `Spouse of ${parent}`, photo_ids: photosOf(m.id, r.id), ...rel(o) });
+      context: r.relation === "child" ? `Child of ${parent}` : `Spouse of ${parent}`, photo_ids: photosOf(m.id, r.id), ...rel(o), years: r.birth_year ? o.years : null });
   }
   items.sort((a, b) => (a.days as number) - (b.days as number) || String(a.display_name).localeCompare(String(b.display_name)));
   return c.json({ today, range, items });

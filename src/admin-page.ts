@@ -1,4 +1,5 @@
 import { head } from "./styles";
+import { BDAY_JS } from "./bday";
 const TITLE_OPTS = `<option value="">None</option><option>Brother</option><option>Sister</option><option>Pastor</option><option>Deacon</option><option>Deaconess</option>`;
 // Single-page admin UI. Served behind basic auth; the browser re-sends the
 // credentials automatically on same-origin fetches to /api/admin/*.
@@ -29,7 +30,7 @@ export const adminPage = () => `${head("CE Admin")}<body>
  <button class="item btn" style="justify-content:space-between" onclick="show('settings')">Settings <span>›</span></button></div></section>
 <section class="view" id="v-members"><h1>Members</h1><p class="sub">Each member gets a private link to choose their cell.</p>
  <form class="card stack" onsubmit="addMember(event)"><div class="row"><select id="mTitle" aria-label="Title" style="flex:0 1 130px">${TITLE_OPTS}</select><input id="mFirst" placeholder="First name" required aria-label="First name"><input id="mLast" placeholder="Last name" aria-label="Last name"></div>
- <div><label class="f" for="mDob">Date of birth <span class="opt">optional</span></label><input id="mDob" type="date"></div>
+ <div id="mBday"></div>
  <div class="row"><input id="mPhone" placeholder="Phone (optional)" inputmode="tel" aria-label="Phone"><input id="mEmail" type="email" placeholder="Email (optional)" aria-label="Email"></div>
  <button class="btn primary block">Add member</button></form>
  <h2>All members <span class="m" id="mCount"></span></h2><input id="mSearch" placeholder="Search…" aria-label="Search members" oninput="renderMembers()" style="margin-bottom:10px"><div class="list" id="members"></div></section>
@@ -58,6 +59,7 @@ export const adminPage = () => `${head("CE Admin")}<body>
 <dialog id="dlg"><div class="dh"><b id="dlgTitle"></b><button class="btn" onclick="$('dlg').close()" aria-label="Close">Close</button></div><div class="db" id="dlgBody"></div></dialog>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <script>
+${BDAY_JS}
 const ROLES={COORDINATOR:"Coordinator",PCF_LEADER:"PCF leader",ASST_PCF_LEADER:"Assistant PCF leader",CELL_LEADER:"Cell leader",ASST_CELL_LEADER:"Assistant cell leader",BIBLE_STUDY_TEACHER:"Bible study teacher"};
 let S={churches:[],pcfs:[],cells:[],members:[],roles:[]};
 const $=id=>document.getElementById(id);
@@ -110,7 +112,7 @@ function roleScope(){const r=$("rRole").value;
  $("rScope").innerHTML=r.includes("PCF")?S.pcfs.filter(p=>p.active).map(p=>opt("p"+p.id,p.name)).join(""):r.includes("CELL")?S.cells.filter(x=>x.active).map(x=>opt("c"+x.id,x.name)).join(""):opt("","Not applicable");$("rScope").disabled=!r.includes("PCF")&&!r.includes("CELL")}
 async function addPcf(e){e.preventDefault();await api("/pcfs","POST",{church_id:cid(),name:$("pcfName").value});$("pcfName").value="";toast("PCF added");loadChurch()}
 async function addCell(e,pcf){e.preventDefault();await api("/cells","POST",{pcf_id:pcf,name:e.target.n.value});toast("Cell added");loadChurch()}
-async function addMember(e){e.preventDefault();await api("/members","POST",{church_id:cid(),title:$("mTitle").value,first_name:$("mFirst").value,last_name:$("mLast").value,dob:$("mDob").value,phone:$("mPhone").value,email:$("mEmail").value});["mFirst","mLast","mDob","mPhone","mEmail"].forEach(i=>$(i).value="");toast("Member added");loadChurch()}
+async function addMember(e){e.preventDefault();await api("/members","POST",{church_id:cid(),title:$("mTitle").value,first_name:$("mFirst").value,last_name:$("mLast").value,birth_month:$("mBday").querySelector("[name=birth_month]").value,birth_day:$("mBday").querySelector("[name=birth_day]").value,birth_year:$("mBday").querySelector("[name=birth_year]").value,phone:$("mPhone").value,email:$("mEmail").value});["mFirst","mLast","mPhone","mEmail"].forEach(i=>$(i).value="");mountBday($("mBday"),{},false);toast("Member added");loadChurch()}
 async function setCell(id,v){try{await api("/members/"+id,"PATCH",{cell_id:v?Number(v):null});toast("Cell updated")}catch{}loadChurch()}
 async function copyLink(code){const u=location.origin+"/m/"+code;try{await navigator.clipboard.writeText(u);toast("Link copied")}catch{prompt("Member link",u)}}
 async function resetCode(id){if(confirm("The old link will stop working. Continue?")){await api("/members/"+id+"/reset-code","POST");toast("New link created");loadChurch()}}
@@ -136,7 +138,7 @@ async function loadCel(){document.querySelectorAll("[data-r]").forEach(b=>b.setA
  const label={today:"today",week:"in the next 7 days",month:"this month"}[RANGE];
  $("celSub").textContent=CEL.length+" celebration"+(CEL.length===1?"":"s")+" "+label;
  $("cel").innerHTML=CEL.length?CEL.map((c,i)=>{const when=c.days===0?"Today":c.days===1?"Tomorrow":c.days<0?fmtDM(c.date)+" · passed":fmtDM(c.date);
-  const kind=c.type==="birthday"?"Birthday":"Wedding anniversary";const yrs=c.type==="anniversary"&&c.years>0?" · "+c.years+(c.years===1?" year":" years"):"";
+  const kind=c.type==="birthday"?"Birthday":"Wedding anniversary";const yrs=c.type==="anniversary"&&c.years>0?" · "+c.years+(c.years===1?" year":" years"):c.type==="birthday"&&c.years!=null&&c.years>0?" · turns "+c.years:"";
   const av=c.photo_ids.length?'<img alt="" src="/api/admin/photos/'+c.photo_ids[0]+'/image">':h((c.display_name.split(" ").pop()||"?")[0]);
   return '<div class="item"><div class="cel"><div class="av">'+av+'</div><div><div class="when">'+when+'</div><div class="t">'+h(c.display_name)+'</div><div class="m">'+kind+yrs+(c.context?" · "+h(c.context):"")+" · "+h(c.church_name)+(c.photo_ids.length?"":" · no approved photo")+'</div></div></div><div class="acts"><button class="btn primary" onclick="ecard('+i+')">Make e-card</button></div></div>'}).join(""):empty("Nothing to celebrate "+label+".");}
 
@@ -151,22 +153,23 @@ async function review(id,status,thenMember){await api("/photos/"+id,"PATCH",{sta
 
 // ---- member editor ----
 async function editMember(id){const m=await api("/members/"+id);
- const rels=m.relatives.map(r=>'<div class="item"><div><div class="t">'+h((r.title?r.title+" ":"")+r.first_name+" "+(r.last_name||""))+'</div><div class="m">'+(r.relation==="spouse"?"Spouse":"Child")+(r.dob?" · born "+fmt(r.dob):"")+'</div></div><button class="btn danger" onclick="delRelA('+r.id+','+id+')">Remove</button></div>').join("");
+ const rels=m.relatives.map(r=>'<div class="item"><div><div class="t">'+h((r.title?r.title+" ":"")+r.first_name+" "+(r.last_name||""))+'</div><div class="m">'+(r.relation==="spouse"?"Spouse":"Child")+(r.birth_month?" · birthday "+fmtBirth(r):"")+'</div></div><button class="btn danger" onclick="delRelA('+r.id+','+id+')">Remove</button></div>').join("");
  const who=r=>r?(m.relatives.find(x=>x.id===r)||{}).first_name||"Family":"Member";
  const photos=m.photos.map(p=>'<figure class="ph"><img loading="lazy" src="/api/admin/photos/'+p.id+'/image" alt=""><span class="badge '+p.status+'">'+h(who(p.relative_id))+" · "+p.status+'</span>'+(p.status!=="approved"?'<button class="sel" aria-label="Approve" onclick="review('+p.id+',\\'approved\\','+id+')">✓</button>':"")+"</figure>").join("");
  openDlg(m.name,'<form class="stack" onsubmit="saveMember(event,'+id+')">'
   +'<div class="row"><div style="flex:0 1 130px"><label class="f">Title</label>'+titleSel("title",m.title)+'</div><div><label class="f">First name</label><input name="first_name" required value="'+h(m.first_name||m.name)+'"></div></div>'
   +'<div><label class="f">Last name</label><input name="last_name" value="'+h(m.last_name)+'"></div>'
   +'<div class="row"><div><label class="f">Phone</label><input name="phone" inputmode="tel" value="'+h(m.phone?"+"+m.phone:"")+'"></div><div><label class="f">Email</label><input name="email" type="email" value="'+h(m.email)+'"></div></div>'
-  +'<div><label class="f">Date of birth</label><input name="dob" type="date" value="'+h(m.dob)+'"></div>'
+  +'<div id="eBday"></div>'
   +'<div class="row"><div><label class="f">Marital status</label><select name="marital_status" onchange="this.form.anniversary.disabled=this.value!==\\'married\\'"><option value="single"'+(m.marital_status!=="married"?" selected":"")+'>Single</option><option value="married"'+(m.marital_status==="married"?" selected":"")+'>Married</option></select></div>'
   +'<div><label class="f">Wedding anniversary</label><input name="anniversary" type="date" value="'+h(m.anniversary)+'"'+(m.marital_status==="married"?"":" disabled")+'></div></div>'
   +'<label class="switch"><span>Has kids</span><input type="checkbox" name="has_kids"'+(m.has_kids?" checked":"")+'><span class="k"></span></label>'
   +'<button class="btn primary block">Save details</button></form>'
   +'<h2>Family</h2><div class="list">'+(rels||empty("No family added."))+'</div>'
   +'<form class="card stack" style="margin-top:10px" onsubmit="addRelA(event,'+id+')"><div class="row"><select name="relation" aria-label="Relation" onchange="this.form.title.disabled=this.value===\\'child\\'"><option value="child">Child</option><option value="spouse">Spouse</option></select>'+titleSel("title","").replace("<select",'<select disabled aria-label="Title"')+'</div>'
-  +'<div class="row"><input name="first_name" placeholder="First name" required aria-label="First name"><input name="last_name" placeholder="Last name" aria-label="Last name"></div><input name="dob" type="date" aria-label="Date of birth"><button class="btn block">Add family member</button></form>'
-  +'<h2>Photos</h2>'+(photos?'<div class="grid">'+photos+"</div>":empty("No photos uploaded.")));}
+  +'<div class="row"><input name="first_name" placeholder="First name" required aria-label="First name"><input name="last_name" placeholder="Last name" aria-label="Last name"></div><div id="rBday"></div><button class="btn block">Add family member</button></form>'
+  +'<h2>Photos</h2>'+(photos?'<div class="grid">'+photos+"</div>":empty("No photos uploaded.")));
+ mountBday($("eBday"),m,false);mountBday($("rBday"),{},false);}
 async function saveMember(e,id){e.preventDefault();const b=fObj(e.target);b.has_kids=e.target.has_kids.checked;if(b.marital_status!=="married")b.anniversary="";
  try{await api("/members/"+id,"PATCH",b);toast("Saved");loadChurch();editMember(id)}catch{}}
 async function addRelA(e,id){e.preventDefault();try{await api("/members/"+id+"/relatives","POST",fObj(e.target));toast("Added");editMember(id)}catch{}}
@@ -208,5 +211,5 @@ function cardFile(){return new Promise(r=>$("cv").toBlob(b=>r(new File([b],(EC.c
 async function downloadCard(){const f=await cardFile();const a=document.createElement("a");a.href=URL.createObjectURL(f);a.download=f.name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),4000);toast("Downloaded")}
 async function shareCard(){const f=await cardFile();if(navigator.canShare&&navigator.canShare({files:[f]})){try{await navigator.share({files:[f],title:EC.name})}catch{}}else downloadCard()}
 
-show((location.hash.slice(1))||"celebrate");init();
+mountBday($("mBday"),{},false);show((location.hash.slice(1))||"celebrate");init();
 </script></body></html>`;

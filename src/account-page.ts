@@ -1,4 +1,5 @@
 import { head } from "./styles";
+import { BDAY_JS } from "./bday";
 
 const TITLE_OPTS = `<option value="">None</option><option>Brother</option><option>Sister</option><option>Pastor</option><option>Deacon</option><option>Deaconess</option>`;
 
@@ -16,7 +17,7 @@ export const accountPage = () => `${head("CE Membership")}<body>
   <p class="hint" id="preview"></p>
   <div><label class="f" for="sPhone">Phone</label><input id="sPhone" name="phone" required inputmode="tel" autocomplete="tel" placeholder="07XX XXX XXX"></div>
   <div><label class="f" for="sEmail">Email <span class="opt">optional</span></label><input id="sEmail" name="email" type="email" autocomplete="email"></div>
-  <div><label class="f" for="sDob">Date of birth</label><input id="sDob" name="dob" type="date" required></div>
+  <div id="sBday"></div>
   <div><label class="f" for="sChurch">Church</label><select id="sChurch" name="church_id" required onchange="loadCells(this.value,'sCell','sCellWrap')"></select></div>
   <div id="sCellWrap" hidden><label class="f" for="sCell">Cell <span class="opt">optional</span></label><select id="sCell" name="cell_id"></select></div>
   <div><label class="f" for="sPass">Password</label><input id="sPass" name="password" type="password" minlength="8" required autocomplete="new-password" placeholder="At least 8 characters"></div>
@@ -39,7 +40,7 @@ export const accountPage = () => `${head("CE Membership")}<body>
    <div><label class="f" for="pLast">Last name</label><input id="pLast" name="last_name"></div>
    <div><label class="f" for="pPhone">Phone</label><input id="pPhone" name="phone" inputmode="tel" required></div>
    <div><label class="f" for="pEmail">Email <span class="opt">optional</span></label><input id="pEmail" name="email" type="email"></div>
-   <div><label class="f" for="pDob">Date of birth</label><input id="pDob" name="dob" type="date" required></div>
+   <div id="pBday"></div>
    <div id="pCellWrap" hidden><label class="f" for="pCell">My cell <span class="opt">optional</span></label><select id="pCell" name="cell_id"></select></div>
    <button class="btn primary block">Save profile</button>
   </form>
@@ -60,7 +61,7 @@ export const accountPage = () => `${head("CE Membership")}<body>
   <div id="kidsWrap" hidden><div class="list" id="kidsList" style="margin-top:10px"></div>
    <form class="card stack" style="margin-top:10px" onsubmit="addRel(event,'child')"><b>Add a child</b>
     <div class="row"><input name="first_name" placeholder="First name" required aria-label="Child first name"><input name="last_name" placeholder="Last name" aria-label="Child last name"></div>
-    <div><label class="f">Date of birth</label><input name="dob" type="date" required></div><button class="btn primary block">Add child</button></form></div>
+    <div class="kidBday"></div><button class="btn primary block">Add child</button></form></div>
  </div>
 
  <div class="view" id="v-photos">
@@ -82,6 +83,7 @@ export const accountPage = () => `${head("CE Membership")}<body>
 </nav>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <script>
+${BDAY_JS}
 const $=id=>document.getElementById(id);
 const h=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]);
 let tt;function toast(m,err){const t=$("toast");t.textContent=m;t.className="toast show"+(err?" err":"");clearTimeout(tt);tt=setTimeout(()=>t.className="toast",2800)}
@@ -100,6 +102,7 @@ function namePreview(){const t=$("sTitle").value,f=$("sFirst").value.trim();$("p
 $("sTitle").onchange=namePreview;$("sFirst").oninput=namePreview;
 async function loadCells(church,sel,wrap,current){const cells=await api("/api/public/cells?church_id="+church);$(wrap).hidden=!cells.length;
  $(sel).innerHTML='<option value="">I\\'m not in a cell</option>'+cells.map(c=>'<option value="'+c.id+'"'+(c.id===current?" selected":"")+">"+h(c.name)+"</option>").join("")}
+mountBday($("sBday"),{},true);
 async function boot(){
  try{ME=await api("/api/me")}catch(e){ME=null}
  $("auth").hidden=!!ME;$("app").hidden=!ME;$("nav").hidden=!ME;$("logout").hidden=!ME;
@@ -110,14 +113,16 @@ async function boot(){
 async function refresh(){ME=await api("/api/me");render()}
 function render(){const p=ME.profile;
  $("hello").textContent="Hello, "+p.display_name;$("churchPill").textContent=p.church_name+(p.cell_name?" · "+p.cell_name:"");
- $("pTitle").value=p.title||"";$("pFirst").value=p.first_name||"";$("pLast").value=p.last_name||"";$("pPhone").value=p.phone?"+"+p.phone:"";$("pEmail").value=p.email||"";$("pDob").value=p.dob||"";
+ $("pTitle").value=p.title||"";$("pFirst").value=p.first_name||"";$("pLast").value=p.last_name||"";$("pPhone").value=p.phone?"+"+p.phone:"";$("pEmail").value=p.email||"";mountBday($("pBday"),p,true);
  $("pCellWrap").hidden=!ME.cells_enabled;$("pCell").innerHTML='<option value="">I\\'m not in a cell</option>'+ME.cells.map(c=>'<option value="'+c.id+'"'+(c.id===p.cell_id?" selected":"")+">"+h(c.name)+"</option>").join("");
  const married=p.marital_status==="married";$("married").checked=married;$("annWrap").hidden=!married;$("ann").value=p.anniversary||"";$("spouseWrap").hidden=!married;
  const sp=ME.relatives.find(r=>r.relation==="spouse");
  $("spouse").innerHTML=relForm("spouse",sp);
  $("kids").checked=p.has_kids;$("kidsWrap").hidden=!p.has_kids;
  const kids=ME.relatives.filter(r=>r.relation==="child");
- $("kidsList").innerHTML=kids.map(k=>'<details class="item" style="display:block"><summary style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;min-height:44px"><span><span class="t">'+h(k.first_name+" "+(k.last_name||""))+'</span><br><span class="m">'+fmt(k.dob)+'</span></span><span class="m">Edit</span></summary>'+relForm("child",k)+"</details>").join("");
+ $("kidsList").innerHTML=kids.map(k=>'<details class="item" style="display:block"><summary style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;min-height:44px"><span><span class="t">'+h(k.first_name+" "+(k.last_name||""))+'</span><br><span class="m">'+fmtBirth(k)+'</span></span><span class="m">Edit</span></summary>'+relForm("child",k)+"</details>").join("");
+ document.querySelectorAll(".relBday").forEach(el=>mountBday(el,{birth_month:Number(el.dataset.m)||null,birth_day:Number(el.dataset.d)||null,birth_year:Number(el.dataset.y)||null},!!el.dataset.req));
+ document.querySelectorAll(".kidBday").forEach(el=>{if(!el.firstChild)mountBday(el,{},true)});
  const who=[["","Me"]].concat(ME.relatives.map(r=>[r.id,(r.relation==="spouse"?"Spouse: ":"")+r.first_name]));
  const cur=$("who").value;$("who").innerHTML=who.map(([v,t])=>'<option value="'+v+'"'+(String(v)===cur?" selected":"")+">"+h(t)+"</option>").join("");
  const groups=who.map(([v,t])=>[t,ME.photos.filter(ph=>String(ph.relative_id??"")===String(v))]).filter(g=>g[1].length);
@@ -126,7 +131,7 @@ function render(){const p=ME.profile;
 function relForm(kind,r){r=r||{};const id=r.id?r.id:"";
  return '<form class="card stack" style="margin-top:8px" onsubmit="saveRel(event,\\''+kind+'\\','+(id||"null")+')">'
   +(kind==="spouse"?'<div class="row"><div style="flex:0 1 140px"><label class="f">Title</label><select name="title">'+titleOpts(r.title)+'</select></div><div><label class="f">First name</label><input name="first_name" required value="'+h(r.first_name)+'"></div></div>':'<div><label class="f">First name</label><input name="first_name" required value="'+h(r.first_name)+'"></div>')
-  +'<div><label class="f">Last name</label><input name="last_name" value="'+h(r.last_name)+'"></div><div><label class="f">Date of birth</label><input name="dob" type="date" max="'+today+'" '+(kind==="child"?"required ":"")+'value="'+h(r.dob)+'"></div>'
+  +'<div><label class="f">Last name</label><input name="last_name" value="'+h(r.last_name)+'"></div><div class="relBday" data-req="'+(kind==="child"?1:"")+'" data-m="'+(r.birth_month||"")+'" data-d="'+(r.birth_day||"")+'" data-y="'+(r.birth_year||"")+'"></div>'
   +'<div class="row"><button class="btn primary">'+(id?"Save":"Add spouse")+'</button>'+(id?'<button type="button" class="btn danger" onclick="delRel('+id+')">Remove</button>':"")+"</div></form>"}
 function show(v){document.querySelectorAll(".view").forEach(e=>e.classList.toggle("on",e.id==="v-"+v));document.querySelectorAll("#nav button").forEach(b=>b.setAttribute("aria-current",b.dataset.v===v?"page":"false"));history.replaceState(null,"","#"+v);scrollTo(0,0)}
 async function doSignup(e){e.preventDefault();const f=e.target;if(!f.reportValidity())return;try{await api("/api/auth/signup","POST",formObj(f));toast("Welcome!");boot()}catch(x){toast(x.message,true)}}
@@ -138,7 +143,7 @@ async function changePw(e){e.preventDefault();try{await api("/api/me/password","
 async function setMarried(on){if(!on&&ME.relatives.some(r=>r.relation==="spouse")&&!confirm("This removes your spouse's details and photos. Continue?")){$("married").checked=true;return}
  patchMe({marital_status:on?"married":"single"},on?"Now add your spouse and anniversary":"Saved")}
 async function saveRel(e,kind,id){e.preventDefault();const b=formObj(e.target);try{if(id)await api("/api/me/relatives/"+id,"PATCH",b);else await api("/api/me/relatives","POST",{...b,relation:kind});toast("Saved");refresh()}catch(x){toast(x.message,true)}}
-async function addRel(e,kind){e.preventDefault();try{await api("/api/me/relatives","POST",{...formObj(e.target),relation:kind});e.target.reset();toast("Child added");refresh()}catch(x){toast(x.message,true)}}
+async function addRel(e,kind){e.preventDefault();try{await api("/api/me/relatives","POST",{...formObj(e.target),relation:kind});e.target.reset();e.target.querySelector(".kidBday").innerHTML="";toast("Child added");refresh()}catch(x){toast(x.message,true)}}
 async function delRel(id){if(!confirm("Remove this person and their photos?"))return;await api("/api/me/relatives/"+id,"DELETE");toast("Removed");refresh()}
 async function delPhoto(id){if(!confirm("Delete this photo?"))return;await api("/api/me/photos/"+id,"DELETE");refresh()}
 // Resize on-device so uploads are fast and small (max 1600px JPEG).

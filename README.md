@@ -7,7 +7,7 @@ Runs on **Cloudflare Workers + D1**, written in TypeScript with [Hono](https://h
 The app collects member details so the church can send e-cards for **birthdays** and **wedding anniversaries**. It also serves as the church member database.
 
 ## Member accounts (`/`)
-- Members create an account with title (Brother, Sister, Pastor, Deacon, Deaconess or None), first and last name, phone, optional email, date of birth, church, optional cell and a password. Cards show the title plus first name, e.g. "Sister Grace".
+- Members create an account with title (Brother, Sister, Pastor, Deacon, Deaconess or None), first and last name, phone, optional email, birthday (month and day required, year optional), church, optional cell and a password. Cards show the title plus first name, e.g. "Sister Grace".
 - Members log in with their phone or email and password. Sessions use an HMAC-signed, HttpOnly cookie that lasts 30 days. Changing the password signs out every other session.
 - **Profile:** edit details and pick a cell (only when the Cells feature is on).
 - **Family:**

@@ -165,7 +165,7 @@ describe("accounts, family, photos, celebrations", () => {
     return { status: r.status, json, text, headers: r.headers };
   };
   const png = () => new File([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3])], "p.png", { type: "image/png" });
-  const signup = { title: "Brother", first_name: "John", last_name: "Okello", phone: "0772 123456", email: "john@example.com", dob: "1990-10-12", password: "s3cret-pass" };
+  const signup = { title: "Brother", first_name: "John", last_name: "Okello", phone: "0772 123456", email: "john@example.com", birth_month: 10, birth_day: 12, birth_year: 1990, password: "s3cret-pass" };
 
   it("lists public churches and cells (id+name only)", async () => {
     const r = await call("/api/public/churches", { auth: null });
@@ -178,8 +178,11 @@ describe("accounts, family, photos, celebrations", () => {
 
   it("signs up with validation, normalised phone and duplicate protection", async () => {
     expect((await me("/api/auth/signup", { method: "POST", body: { ...signup, church_id: church, password: "short" } })).status).toBe(400);
-    expect((await me("/api/auth/signup", { method: "POST", body: { ...signup, church_id: church, dob: "" } })).status).toBe(400);
-    expect((await me("/api/auth/signup", { method: "POST", body: { ...signup, church_id: church, dob: "2999-01-01" } })).status).toBe(400);
+    const bad = (x: object) => me("/api/auth/signup", { method: "POST", body: { ...signup, church_id: church, ...x } });
+    expect((await bad({ birth_month: "", birth_day: "" })).status).toBe(400);          // required
+    expect((await bad({ birth_month: 4, birth_day: 31 })).status).toBe(400);           // no April 31
+    expect((await bad({ birth_month: 2, birth_day: 29, birth_year: 2001 })).status).toBe(400); // not leap
+    expect((await bad({ birth_year: 2999 })).status).toBe(400);                         // future
     const r = await me("/api/auth/signup", { method: "POST", body: { ...signup, church_id: church, cell_id: mainCell } });
     expect(r.status).toBe(201);
     expect(r.headers.get("set-cookie")).toMatch(/HttpOnly/i);
@@ -203,10 +206,11 @@ describe("accounts, family, photos, celebrations", () => {
   it("manages marriage, spouse, anniversary and kids", async () => {
     expect((await me("/api/me/relatives", { method: "POST", body: { relation: "spouse", first_name: "Mary" } })).status).toBe(400); // not married yet
     await me("/api/me", { method: "PATCH", body: { marital_status: "married", anniversary: "2015-10-14" } });
-    const sp = await me("/api/me/relatives", { method: "POST", body: { relation: "spouse", title: "Sister", first_name: "Mary", dob: "1992-10-11" } });
+    const sp = await me("/api/me/relatives", { method: "POST", body: { relation: "spouse", title: "Sister", first_name: "Mary", birth_month: 10, birth_day: 11 } });
     expect(sp.status).toBe(201);
     expect((await me("/api/me/relatives", { method: "POST", body: { relation: "spouse", first_name: "Other" } })).status).toBe(409);
-    const kid = await me("/api/me/relatives", { method: "POST", body: { relation: "child", title: "Brother", first_name: "Tim", dob: "2018-10-13" } });
+    expect((await me("/api/me/relatives", { method: "POST", body: { relation: "child", first_name: "NoBday" } })).status).toBe(400);
+    const kid = await me("/api/me/relatives", { method: "POST", body: { relation: "child", title: "Brother", first_name: "Tim", birth_month: 10, birth_day: 13, birth_year: 2018 } });
     expect(kid.json.title).toBeNull(); // children have no title
     const p = await me("/api/me");
     expect(p.json.profile).toMatchObject({ marital_status: "married", anniversary: "2015-10-14", has_kids: true });
@@ -236,14 +240,24 @@ describe("accounts, family, photos, celebrations", () => {
     const r = (range: string) => call(`/api/admin/celebrations?range=${range}&today=2026-10-10&church_id=${church}`);
     const week = (await r("week")).json.items;
     const john = week.find((i: any) => i.display_name === "Brother John");
-    expect(john).toMatchObject({ type: "birthday", date: "2026-10-12", days: 2 });
+    expect(john).toMatchObject({ type: "birthday", date: "2026-10-12", days: 2, years: 36 });
     expect(john.photo_ids.length).toBe(1); // only approved photos
-    expect(week.find((i: any) => i.display_name === "Sister Mary")).toMatchObject({ who: "spouse", date: "2026-10-11", context: "Spouse of Brother John" });
-    expect(week.find((i: any) => i.display_name === "Tim")).toMatchObject({ who: "child", date: "2026-10-13" });
+    expect(week.find((i: any) => i.display_name === "Sister Mary")).toMatchObject({ who: "spouse", date: "2026-10-11", context: "Spouse of Brother John", years: null });
+    expect(week.find((i: any) => i.display_name === "Tim")).toMatchObject({ who: "child", date: "2026-10-13", years: 8 });
     expect(week.find((i: any) => i.type === "anniversary")).toMatchObject({ display_name: "Brother John & Sister Mary", years: 11, date: "2026-10-14" });
     expect((await r("today")).json.items).toHaveLength(0);
     expect((await call("/api/admin/celebrations?range=month&today=2026-10-20")).json.items.length).toBeGreaterThanOrEqual(4);
     expect((await call("/api/admin/celebrations?range=week&today=2026-11-01")).json.items).toHaveLength(0);
+  });
+
+  it("Feb 29 birthdays (year unknown) fall on Feb 28 in non-leap years", async () => {
+    const m = await post("/api/admin/members", { church_id: church, first_name: "Leap", birth_month: 2, birth_day: 29 });
+    expect(m.status).toBe(201); expect(m.json).toMatchObject({ birth_month: 2, birth_day: 29, birth_year: null });
+    const items = (await call(`/api/admin/celebrations?range=today&today=2027-02-28&church_id=${church}`)).json.items;
+    expect(items.find((i: any) => i.display_name === "Leap")).toMatchObject({ date: "2027-02-28", years: null });
+    const leap = (await call(`/api/admin/celebrations?range=today&today=2028-02-29&church_id=${church}`)).json.items;
+    expect(leap.find((i: any) => i.display_name === "Leap")).toBeTruthy();
+    expect((await call(`/api/admin/members/${m.json.id}`, { method: "DELETE" })).status).toBe(204);
   });
 
   it("going single removes spouse and anniversary", async () => {

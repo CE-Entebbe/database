@@ -2,7 +2,7 @@
 export const CSS = `
 :root{--bg:#f7f7f8;--card:#fff;--text:#18181b;--muted:#63636b;--line:#e6e6ea;--accent:#4338ca;--accent-soft:#eef0ff;--danger:#b42318;--radius:14px;
 --font:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
-[hidden]{display:none!important}*{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
+[hidden]{display:none!important}fieldset.bday{border:0;padding:0;margin:0;min-width:0}fieldset.bday legend{padding:0}*{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--bg);color:var(--text);font:16px/1.5 var(--font);-webkit-font-smoothing:antialiased}
 .wrap{max-width:720px;margin:0 auto;padding:20px 16px 112px}
 header.top{position:sticky;top:0;z-index:5;background:rgba(247,247,248,.88);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
@@ -18,7 +18,7 @@ h2{font-size:1.05rem;margin:28px 0 10px;font-weight:600}
 .item .t{font-weight:550}.item .m{color:var(--muted);font-size:.875rem}
 .item .acts{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
 .stack{display:flex;flex-direction:column;gap:10px}
-label.f{display:block;font-size:.875rem;color:var(--muted);margin-bottom:6px;font-weight:500}
+label.f,legend.f{display:block;font-size:.875rem;color:var(--muted);margin-bottom:6px;font-weight:500}
 input,select{width:100%;min-height:48px;padding:10px 14px;border:1px solid var(--line);border-radius:12px;background:#fff;font:inherit;color:inherit;transition:border-color .15s,box-shadow .15s;appearance:none}
 select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2363636b' stroke-width='1.6' fill='none'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 14px center;padding-right:38px}
 input:focus,select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
