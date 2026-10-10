@@ -241,7 +241,7 @@ describe("admin login page", () => {
     const api = await mf.dispatchFetch("http://ce.local/api/admin/churches");
     expect(api.status).toBe(401); expect(api.headers.get("www-authenticate")).toBeNull();
     const login = await call("/admin/login");
-    expect(login.text).toContain("Admin access code"); expect(login.text).toContain('class="hero"');
+    expect(login.text).toContain("Admin access code"); expect(login.text).toContain(`method="post"`); expect(login.text).toContain('class="hero"');
     const j: Jar = {};
     expect((await call("/admin/login", { jar: j, method: "POST", body: { code: "wrong" } })).status).toBe(401);
     expect(j.ce_admin).toBeUndefined();

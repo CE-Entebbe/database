@@ -852,15 +852,17 @@ app.post("/admin/login", async (c) => {
   const now = Math.floor(Date.now() / 1000), key = "adminfail:" + clientIp(c);
   const cur = await first<{ count: number }>(c.env.DB, "SELECT count FROM rate_limits WHERE key=? AND window_start=?", key, now - (now % ADMIN_FAIL_WINDOW));
   if ((cur?.count ?? 0) >= ADMIN_FAIL_LIMIT) return c.json({ error: "Too many attempts. Please wait 15 minutes and try again." }, 429);
-  const b = await body(c);
+  // JSON from the page script, or a plain form post if JavaScript is unavailable (never a GET, so the code never lands in a URL).
+  const isForm = (c.req.header("content-type") ?? "").includes("application/x-www-form-urlencoded");
+  const b: Record<string, unknown> = isForm ? Object.fromEntries((await c.req.formData()).entries()) : await body(c);
   const code = typeof b.code === "string" ? b.code.trim() : "";
   if (!code || !timingSafeEqual(code, token)) {
     await rateLimit(c.env.DB, key, ADMIN_FAIL_LIMIT, ADMIN_FAIL_WINDOW);
-    return c.json({ error: "That access code isn't right" }, 401);
+    return isForm ? c.redirect("/admin/login?error=1", 303) : c.json({ error: "That access code isn't right" }, 401);
   }
   setCookie(c, ADMIN_COOKIE, await signToken(adminSecret(c), "admin", {}, ADMIN_HOURS * 3600), {
     httpOnly: true, secure: new URL(c.req.url).protocol === "https:", sameSite: "Lax", path: "/", maxAge: ADMIN_HOURS * 3600 });
-  return c.json({ ok: true });
+  return isForm ? c.redirect("/admin", 303) : c.json({ ok: true });
 });
 app.post("/admin/logout", (c) => { deleteCookie(c, ADMIN_COOKIE, { path: "/" }); return c.json({ ok: true }); });
 app.get("/admin/manifest.webmanifest", (c) => c.body(JSON.stringify(manifest({ id: "/admin", name: "CE Entebbe Admin", short: "CE Admin", start: "/admin", scope: "/admin" })),
