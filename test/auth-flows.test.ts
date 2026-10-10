@@ -233,3 +233,33 @@ describe("masking helpers", () => {
     expect(maskName("Al", null)).toBe("A*");
   });
 });
+
+describe("admin login page", () => {
+  it("no Basic popup, branded login, cookie session, logout, rate-limited failures, Bearer still works", async () => {
+    const page = await mf.dispatchFetch("http://ce.local/admin", { headers: { accept: "text/html" }, redirect: "manual" });
+    expect(page.status).toBe(302); expect(page.headers.get("location")).toBe("/admin/login"); expect(page.headers.get("www-authenticate")).toBeNull();
+    const api = await mf.dispatchFetch("http://ce.local/api/admin/churches");
+    expect(api.status).toBe(401); expect(api.headers.get("www-authenticate")).toBeNull();
+    const login = await call("/admin/login");
+    expect(login.text).toContain("Admin access code"); expect(login.text).toContain('class="hero"');
+    const j: Jar = {};
+    expect((await call("/admin/login", { jar: j, method: "POST", body: { code: "wrong" } })).status).toBe(401);
+    expect(j.ce_admin).toBeUndefined();
+    expect((await call("/admin/login", { jar: j, method: "POST", body: { code: "t" } })).json).toEqual({ ok: true });
+    expect(j.ce_admin).toBeTruthy(); expect(j.ce_session).toBeUndefined();
+    expect((await call("/admin", { jar: j })).text).toContain("Celebrations");
+    expect((await call("/api/admin/churches", { jar: j })).status).toBe(200);
+    expect((await call("/admin/login", { jar: j })).location).toBe("/admin");
+    // a member session is not an admin session
+    expect((await call("/api/admin/churches", { jar: { ce_session: "x" } })).status).toBe(401);
+    await call("/admin/logout", { jar: j, method: "POST" });
+    expect(j.ce_admin).toBeUndefined();
+    expect((await mf.dispatchFetch("http://ce.local/api/admin/churches", { headers: { authorization: "Bearer t" } })).status).toBe(200);
+    // failures are rate limited per IP
+    const attempt = (code: string) => mf.dispatchFetch("http://ce.local/admin/login", { method: "POST",
+      headers: { "content-type": "application/json", "cf-connecting-ip": "7.7.7.7" }, body: JSON.stringify({ code }) });
+    for (let i = 0; i < 10; i++) expect((await attempt("nope")).status).toBe(401);
+    expect((await attempt("t")).status).toBe(429);
+    expect((await mf.dispatchFetch("http://ce.local/admin/login", { method: "POST", headers: { "content-type": "application/json", "cf-connecting-ip": "6.6.6.6" }, body: JSON.stringify({ code: "t" }) })).status).toBe(200);
+  });
+});

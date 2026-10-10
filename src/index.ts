@@ -2,6 +2,7 @@ import { Hono, type Context, type Next } from "hono";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { hashPassword, verifyPassword, signSession, readSession, fingerprint, SESSION_COOKIE, SESSION_DAYS , signToken, readToken, randomUrlSafe, pkceChallenge } from "./auth";
 import { adminPage } from "./admin-page";
+import { adminLoginPage } from "./admin-login";
 import { memberPage, messagePage } from "./member-page";
 import { accountPage } from "./account-page";
 import { ICONS } from "./icons";
@@ -48,20 +49,27 @@ function timingSafeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
+const ADMIN_COOKIE = "ce_admin", ADMIN_HOURS = 12;
+const adminSecret = (c: C) => (c.env.SESSION_SECRET ?? "") + "|admin|" + (c.env.ADMIN_TOKEN ?? "");
+async function adminCookieOk(c: C) {
+  // Bound to the current ADMIN_TOKEN: rotating the token signs every admin out.
+  return !!(await readToken(adminSecret(c), "admin", getCookie(c, ADMIN_COOKIE)));
+}
 async function requireAdmin(c: C, next: Next) {
   const token = c.env.ADMIN_TOKEN;
   if (!token) return c.json({ error: "ADMIN_TOKEN is not configured" }, 503);
+  const path = new URL(c.req.url).pathname;
+  if (path === "/admin/login" || path === "/admin/logout") return next();
   const h = c.req.header("Authorization") ?? "";
   let supplied = "";
   if (h.startsWith("Bearer ")) supplied = h.slice(7);
   else if (h.startsWith("Basic ")) {
     try { const d = atob(h.slice(6)); supplied = d.slice(d.indexOf(":") + 1); } catch { /* ignore */ }
   }
-  if (!supplied || !timingSafeEqual(supplied, token)) {
-    c.header("WWW-Authenticate", 'Basic realm="CE Admin", charset="UTF-8"');
-    return c.json({ error: "Unauthorized" }, 401);
-  }
-  await next();
+  if ((supplied && timingSafeEqual(supplied, token)) || (await adminCookieOk(c))) return next();
+  // No WWW-Authenticate header, so browsers never show the Basic-auth popup.
+  if (c.req.method === "GET" && !path.startsWith("/api/") && (c.req.header("accept") ?? "").includes("text/html")) return c.redirect("/admin/login");
+  return c.json({ error: "Unauthorized" }, 401);
 }
 
 async function body(c: C): Promise<Record<string, unknown>> {
@@ -836,6 +844,25 @@ app.use("/admin", requireAdmin);
 app.use("/admin/*", requireAdmin);
 app.use("/api/admin/*", requireAdmin);
 app.get("/admin", (c) => c.html(adminPage()));
+const ADMIN_FAIL_LIMIT = 10, ADMIN_FAIL_WINDOW = 900;
+app.get("/admin/login", async (c) => (await adminCookieOk(c)) ? c.redirect("/admin") : c.html(adminLoginPage()));
+app.post("/admin/login", async (c) => {
+  const token = c.env.ADMIN_TOKEN;
+  if (!token || !c.env.SESSION_SECRET) return c.json({ error: "Admin sign-in is not configured" }, 503);
+  const now = Math.floor(Date.now() / 1000), key = "adminfail:" + clientIp(c);
+  const cur = await first<{ count: number }>(c.env.DB, "SELECT count FROM rate_limits WHERE key=? AND window_start=?", key, now - (now % ADMIN_FAIL_WINDOW));
+  if ((cur?.count ?? 0) >= ADMIN_FAIL_LIMIT) return c.json({ error: "Too many attempts. Please wait 15 minutes and try again." }, 429);
+  const b = await body(c);
+  const code = typeof b.code === "string" ? b.code.trim() : "";
+  if (!code || !timingSafeEqual(code, token)) {
+    await rateLimit(c.env.DB, key, ADMIN_FAIL_LIMIT, ADMIN_FAIL_WINDOW);
+    return c.json({ error: "That access code isn't right" }, 401);
+  }
+  setCookie(c, ADMIN_COOKIE, await signToken(adminSecret(c), "admin", {}, ADMIN_HOURS * 3600), {
+    httpOnly: true, secure: new URL(c.req.url).protocol === "https:", sameSite: "Lax", path: "/", maxAge: ADMIN_HOURS * 3600 });
+  return c.json({ ok: true });
+});
+app.post("/admin/logout", (c) => { deleteCookie(c, ADMIN_COOKIE, { path: "/" }); return c.json({ ok: true }); });
 app.get("/admin/manifest.webmanifest", (c) => c.body(JSON.stringify(manifest({ id: "/admin", name: "CE Entebbe Admin", short: "CE Admin", start: "/admin", scope: "/admin" })),
   200, { "content-type": "application/manifest+json" }));
 

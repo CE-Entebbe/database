@@ -14,7 +14,7 @@ const NAV: [string, string, string][] = [
 
 export const adminPage = () => `${head("CE Admin", "/admin/manifest.webmanifest")}<body>
 <header class="top"><div class="in"><div class="brand">${MARK}<div>CE <span>Admin</span></div></div>
-<select id="church" aria-label="Working church" style="width:auto;min-width:150px;max-width:55vw" onchange="loadChurch()"></select></div></header>
+<div style="display:flex;gap:6px;align-items:center"><select id="church" aria-label="Working church" style="width:auto;min-width:130px;max-width:46vw" onchange="loadChurch()"></select><button class="btn ghost" onclick="logout()" aria-label="Log out" title="Log out" style="padding:0 10px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4h3a2 2 0 012 2v12a2 2 0 01-2 2h-3M10 17l5-5-5-5M15 12H4"/></svg></button></div></div></header>
 <nav class="bottom" aria-label="Sections">${NAV.map(([id, label, ic]) => `<button data-v="${id}" onclick="show('${id}')">${ic}<span>${label}</span></button>`).join("")}</nav>
 <main class="wrap">
 <section class="view" id="v-celebrate"><h1>Celebrations</h1><p class="sub" id="celSub">Birthdays and wedding anniversaries coming up.</p>
@@ -70,7 +70,8 @@ let S={churches:[],pcfs:[],cells:[],members:[],roles:[]};
 const $=id=>document.getElementById(id);
 const h=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]);
 let tt;function toast(m,err){const t=$("toast");t.textContent=m;t.className="toast show"+(err?" err":"");clearTimeout(tt);tt=setTimeout(()=>t.className="toast",2600)}
-async function api(path,method="GET",body){const r=await fetch("/api/admin"+path,{method,headers:body?{"content-type":"application/json"}:{},body:body?JSON.stringify(body):undefined,credentials:"same-origin"});
+async function logout(){await fetch("/admin/logout",{method:"POST",credentials:"same-origin"});location.replace("/admin/login")}
+async function api(path,method="GET",body){const r=await fetch("/api/admin"+path,{method,headers:body?{"content-type":"application/json"}:{},body:body?JSON.stringify(body):undefined,credentials:"same-origin"});if(r.status===401){location.replace("/admin/login");throw new Error("Signed out")}
  if(r.status===204)return null;const j=await r.json();if(!r.ok){toast(j.error||r.statusText,true);throw new Error(j.error)}return j}
 const opt=(v,t,sel)=>'<option value="'+v+'"'+(sel?" selected":"")+">"+h(t)+"</option>";
 const item=(o,title,meta,acts)=>'<div class="item'+(o&&o.active===0?" off":"")+'"><div><div class="t">'+title+'</div>'+(meta?'<div class="m">'+meta+"</div>":"")+'</div><div class="acts">'+acts+"</div></div>";
