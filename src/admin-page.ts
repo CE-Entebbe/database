@@ -33,7 +33,9 @@ export const adminPage = () => `${head("CE Admin")}<body>
  <div id="mBday"></div>
  <div class="row"><input id="mPhone" placeholder="Phone (optional)" inputmode="tel" aria-label="Phone"><input id="mEmail" type="email" placeholder="Email (optional)" aria-label="Email"></div>
  <button class="btn primary block">Add member</button></form>
- <h2>All members <span class="m" id="mCount"></span></h2><input id="mSearch" placeholder="Search…" aria-label="Search members" oninput="renderMembers()" style="margin-bottom:10px"><div class="list" id="members"></div></section>
+ <h2>All members <span class="m" id="mCount"></span></h2><input id="mSearch" placeholder="Search…" aria-label="Search members" oninput="renderMembers()" style="margin-bottom:10px">
+ <div class="chips" role="group" aria-label="Network" style="margin-bottom:10px"><button data-op="" onclick="setOp('')">All</button><button data-op="MTN" onclick="setOp('MTN')">MTN</button><button data-op="Airtel" onclick="setOp('Airtel')">Airtel</button><button data-op="Other" onclick="setOp('Other')">Other</button><button id="sortOp" onclick="SORTOP=!SORTOP;renderMembers()">Sort by network</button><button onclick="exportCsv()">Export CSV</button></div>
+ <div class="list" id="members"></div></section>
 
 <section class="view" id="v-groups"><h1>PCFs & cells</h1><p class="sub">Members only ever see cell names. PCFs stay private to admins.</p>
  <form class="card row" onsubmit="addPcf(event)"><input id="pcfName" placeholder="New PCF name" required aria-label="PCF name"><button class="btn primary" style="flex:0 0 auto">Add PCF</button></form>
@@ -88,10 +90,17 @@ async function init(){
 $("cellsEnabled").onchange=async e=>{await api("/settings","PUT",{cells_enabled:e.target.checked});toast("Cells "+(e.target.checked?"on":"off"))};
 async function addChurch(e){e.preventDefault();const main=S.churches.find(c=>c.parent_id==null);await api("/churches","POST",{name:$("chName").value,parent_id:main?main.id:null});$("chName").value="";toast("Church added");init()}
 const cid=()=>Number($("church").value);
-function renderMembers(){const q=$("mSearch").value.toLowerCase();const list=S.members.filter(m=>!q||(m.name+" "+(m.phone||"")+" "+(m.email||"")).toLowerCase().includes(q));
+let OPF="",SORTOP=false;
+function setOp(o){OPF=o;renderMembers()}
+const OPRANK={MTN:1,Airtel:2,Other:3};
+const num=(p,o)=>p?'<span style="white-space:nowrap">+'+h(p)+(o?' <span class="pill">'+o+'</span>':"")+"</span>":"";
+async function exportCsv(){const ch=cid();const r=await fetch("/api/admin/phones.csv?church_id="+ch+(OPF?"&operator="+OPF:""),{credentials:"same-origin"});const b=await r.blob();const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download="ce-phones"+(OPF?"-"+OPF.toLowerCase():"")+".csv";a.click();toast("CSV downloaded")}
+function renderMembers(){document.querySelectorAll("[data-op]").forEach(b=>b.setAttribute("aria-pressed",b.dataset.op===OPF));$("sortOp").setAttribute("aria-pressed",SORTOP);
+ const q=$("mSearch").value.toLowerCase();let list=S.members.filter(m=>(!q||(m.name+" "+(m.phone||"")+" "+(m.phone_alt||"")+" "+(m.email||"")).toLowerCase().includes(q))&&(!OPF||m.phone_operator===OPF||m.phone_alt_operator===OPF));
+ if(SORTOP)list=[...list].sort((a,b)=>(OPRANK[a.phone_operator]||4)-(OPRANK[b.phone_operator]||4)||a.name.localeCompare(b.name));
  $("mCount").textContent="("+S.members.length+")";
  const cellOpts=sel=>opt("","No cell")+S.cells.filter(x=>x.active||x.id===sel).map(x=>opt(x.id,x.name,x.id===sel)).join("");
- $("members").innerHTML=list.length?list.map(m=>'<div class="item'+(m.active?"":" off")+'" style="flex-direction:column;align-items:stretch"><div style="display:flex;justify-content:space-between;gap:10px"><div><div class="t">'+h(m.name)+'</div><div class="m">'+(h([m.phone,m.email].filter(Boolean).join(" · "))||"No contact")+(m.pcf_name?" · "+h(m.pcf_name):"")+'</div></div></div>'
+ $("members").innerHTML=list.length?list.map(m=>'<div class="item'+(m.active?"":" off")+'" style="flex-direction:column;align-items:stretch"><div style="display:flex;justify-content:space-between;gap:10px"><div><div class="t">'+h(m.name)+'</div><div class="m">'+([num(m.phone,m.phone_operator),num(m.phone_alt,m.phone_alt_operator),h(m.email||"")].filter(Boolean).join(" · ")||"No contact")+(m.spouse_member_name?" · spouse: "+h(m.spouse_member_name):"")+(m.pcf_name?" · "+h(m.pcf_name):"")+'</div></div></div>'
   +'<select aria-label="Cell for '+h(m.name)+'" onchange="setCell('+m.id+',this.value)">'+cellOpts(m.cell_id)+'</select>'
   +'<div class="acts" style="justify-content:flex-start"><button class="btn primary" onclick="editMember('+m.id+')">Open</button><button class="btn" onclick="copyLink(\\''+m.access_code+'\\')">Copy link</button><button class="btn" onclick="resetCode('+m.id+')">New link</button>'+tog("members",m)+'<button class="btn danger" onclick="delMember('+m.id+')">Delete</button></div></div>').join(""):empty(S.members.length?"No matches.":"No members yet.");}
 async function loadChurch(){
@@ -159,17 +168,23 @@ async function editMember(id){const m=await api("/members/"+id);
  openDlg(m.name,'<form class="stack" onsubmit="saveMember(event,'+id+')">'
   +'<div class="row"><div style="flex:0 1 130px"><label class="f">Title</label>'+titleSel("title",m.title)+'</div><div><label class="f">First name</label><input name="first_name" required value="'+h(m.first_name||m.name)+'"></div></div>'
   +'<div><label class="f">Last name</label><input name="last_name" value="'+h(m.last_name)+'"></div>'
-  +'<div class="row"><div><label class="f">Phone</label><input name="phone" inputmode="tel" value="'+h(m.phone?"+"+m.phone:"")+'"></div><div><label class="f">Email</label><input name="email" type="email" value="'+h(m.email)+'"></div></div>'
+  +'<div class="row"><div><label class="f">Phone'+(m.phone_operator?' <span class="pill">'+m.phone_operator+'</span>':"")+'</label><input name="phone" inputmode="tel" value="'+h(m.phone?"+"+m.phone:"")+'"></div><div><label class="f">Alternative phone'+(m.phone_alt_operator?' <span class="pill">'+m.phone_alt_operator+'</span>':"")+'</label><input name="phone_alt" inputmode="tel" value="'+h(m.phone_alt?"+"+m.phone_alt:"")+'"></div></div>'
+  +'<div><label class="f">Email</label><input name="email" type="email" value="'+h(m.email)+'"></div>'
   +'<div id="eBday"></div>'
   +'<div class="row"><div><label class="f">Marital status</label><select name="marital_status" onchange="this.form.anniversary.disabled=this.value!==\\'married\\'"><option value="single"'+(m.marital_status!=="married"?" selected":"")+'>Single</option><option value="married"'+(m.marital_status==="married"?" selected":"")+'>Married</option></select></div>'
   +'<div><label class="f">Wedding anniversary</label><input name="anniversary" type="date" value="'+h(m.anniversary)+'"'+(m.marital_status==="married"?"":" disabled")+'></div></div>'
   +'<label class="switch"><span>Has kids</span><input type="checkbox" name="has_kids"'+(m.has_kids?" checked":"")+'><span class="k"></span></label>'
   +'<button class="btn primary block">Save details</button></form>'
-  +'<h2>Family</h2><div class="list">'+(rels||empty("No family added."))+'</div>'
+  +'<h2>Family</h2>'
+  +(m.spouse_member_id?'<div class="item" style="margin-bottom:10px"><div><div class="t">'+h(m.spouse_member_name)+'</div><div class="m">Linked spouse account · shares children &amp; anniversary</div></div><button class="btn danger" onclick="unlinkSp('+id+')">Unlink</button></div>'
+   :'<form class="row" style="margin-bottom:10px" onsubmit="linkSp(event,'+id+')"><select name="other" aria-label="Link to spouse account"><option value="">Link to an existing member as spouse…</option>'+S.members.filter(x=>x.id!==id&&!x.spouse_member_id).map(x=>opt(x.id,x.name)).join("")+'</select><button class="btn" style="flex:0 0 auto">Link</button></form>')
+  +'<div class="list">'+(rels||empty("No family added."))+'</div>'
   +'<form class="card stack" style="margin-top:10px" onsubmit="addRelA(event,'+id+')"><div class="row"><select name="relation" aria-label="Relation" onchange="this.form.title.disabled=this.value===\\'child\\'"><option value="child">Child</option><option value="spouse">Spouse</option></select>'+titleSel("title","").replace("<select",'<select disabled aria-label="Title"')+'</div>'
   +'<div class="row"><input name="first_name" placeholder="First name" required aria-label="First name"><input name="last_name" placeholder="Last name" aria-label="Last name"></div><div id="rBday"></div><button class="btn block">Add family member</button></form>'
   +'<h2>Photos</h2>'+(photos?'<div class="grid">'+photos+"</div>":empty("No photos uploaded.")));
  mountBday($("eBday"),m,false);mountBday($("rBday"),{},false);}
+async function linkSp(e,id){e.preventDefault();const o=e.target.other.value;if(!o)return;if(!confirm("Link these two members as spouses? Their children and anniversary will be shared."))return;try{await api("/members/"+id+"/link-spouse","POST",{member_id:Number(o)});toast("Linked");loadChurch();editMember(id)}catch{}}
+async function unlinkSp(id){if(!confirm("Unlink this member from their spouse? Children and the anniversary stay with the spouse."))return;try{await api("/members/"+id+"/unlink-spouse","POST");toast("Unlinked");loadChurch();editMember(id)}catch{}}
 async function saveMember(e,id){e.preventDefault();const b=fObj(e.target);b.has_kids=e.target.has_kids.checked;if(b.marital_status!=="married")b.anniversary="";
  try{await api("/members/"+id,"PATCH",b);toast("Saved");loadChurch();editMember(id)}catch{}}
 async function addRelA(e,id){e.preventDefault();try{await api("/members/"+id+"/relatives","POST",fObj(e.target));toast("Added");editMember(id)}catch{}}

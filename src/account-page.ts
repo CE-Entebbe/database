@@ -15,7 +15,8 @@ export const accountPage = () => `${head("CE Membership")}<body>
   <div><label class="f" for="sFirst">First name</label><input id="sFirst" name="first_name" required autocomplete="given-name"></div></div>
   <div><label class="f" for="sLast">Last name</label><input id="sLast" name="last_name" required autocomplete="family-name"></div>
   <p class="hint" id="preview"></p>
-  <div><label class="f" for="sPhone">Phone</label><input id="sPhone" name="phone" required inputmode="tel" autocomplete="tel" placeholder="07XX XXX XXX"></div>
+  <div><label class="f" for="sPhone">Phone</label><input id="sPhone" name="phone" required inputmode="tel" autocomplete="tel" placeholder="07XX XXX XXX" oninput="opHint(this)"><p class="hint op"></p></div>
+  <div><label class="f" for="sPhone2">Alternative phone <span class="opt">optional</span></label><input id="sPhone2" name="phone_alt" inputmode="tel" placeholder="07XX XXX XXX" oninput="opHint(this)"><p class="hint op"></p></div>
   <div><label class="f" for="sEmail">Email <span class="opt">optional</span></label><input id="sEmail" name="email" type="email" autocomplete="email"></div>
   <div id="sBday"></div>
   <div><label class="f" for="sChurch">Church</label><select id="sChurch" name="church_id" required onchange="loadCells(this.value,'sCell','sCellWrap')"></select></div>
@@ -38,7 +39,8 @@ export const accountPage = () => `${head("CE Membership")}<body>
    <div class="row"><div style="flex:0 1 140px"><label class="f" for="pTitle">Title</label><select id="pTitle" name="title">${TITLE_OPTS}</select></div>
    <div><label class="f" for="pFirst">First name</label><input id="pFirst" name="first_name" required></div></div>
    <div><label class="f" for="pLast">Last name</label><input id="pLast" name="last_name"></div>
-   <div><label class="f" for="pPhone">Phone</label><input id="pPhone" name="phone" inputmode="tel" required></div>
+   <div><label class="f" for="pPhone">Phone</label><input id="pPhone" name="phone" inputmode="tel" required oninput="opHint(this)"><p class="hint op"></p></div>
+   <div><label class="f" for="pPhone2">Alternative phone <span class="opt">optional</span></label><input id="pPhone2" name="phone_alt" inputmode="tel" oninput="opHint(this)"><p class="hint op"></p></div>
    <div><label class="f" for="pEmail">Email <span class="opt">optional</span></label><input id="pEmail" name="email" type="email"></div>
    <div id="pBday"></div>
    <div id="pCellWrap" hidden><label class="f" for="pCell">My cell <span class="opt">optional</span></label><select id="pCell" name="cell_id"></select></div>
@@ -55,6 +57,7 @@ export const accountPage = () => `${head("CE Membership")}<body>
    <label class="switch"><span><b>Married</b><br><span class="hint">Add your spouse and wedding anniversary</span></span><input type="checkbox" id="married" role="switch" onchange="setMarried(this.checked)"><span class="k"></span></label>
    <div id="annWrap" hidden><label class="f" for="ann">Wedding anniversary</label><input type="date" id="ann" onchange="patchMe({anniversary:this.value},'Anniversary saved')"></div>
   </div>
+  <div id="links"></div>
   <div id="spouseWrap" hidden><h2>Spouse</h2><div id="spouse"></div></div>
   <h2>Children</h2>
   <div class="card"><label class="switch"><span><b>Do you have kids?</b></span><input type="checkbox" id="kids" role="switch" onchange="patchMe({has_kids:this.checked},this.checked?'Add your children below':'Saved')"><span class="k"></span></label></div>
@@ -113,11 +116,14 @@ async function boot(){
 async function refresh(){ME=await api("/api/me");render()}
 function render(){const p=ME.profile;
  $("hello").textContent="Hello, "+p.display_name;$("churchPill").textContent=p.church_name+(p.cell_name?" · "+p.cell_name:"");
- $("pTitle").value=p.title||"";$("pFirst").value=p.first_name||"";$("pLast").value=p.last_name||"";$("pPhone").value=p.phone?"+"+p.phone:"";$("pEmail").value=p.email||"";mountBday($("pBday"),p,true);
+ $("pTitle").value=p.title||"";$("pFirst").value=p.first_name||"";$("pLast").value=p.last_name||"";$("pPhone").value=p.phone?"+"+p.phone:"";$("pPhone2").value=p.phone_alt?"+"+p.phone_alt:"";document.querySelectorAll("#v-profile input[inputmode=tel]").forEach(opHint);$("pEmail").value=p.email||"";mountBday($("pBday"),p,true);
  $("pCellWrap").hidden=!ME.cells_enabled;$("pCell").innerHTML='<option value="">I\\'m not in a cell</option>'+ME.cells.map(c=>'<option value="'+c.id+'"'+(c.id===p.cell_id?" selected":"")+">"+h(c.name)+"</option>").join("");
  const married=p.marital_status==="married";$("married").checked=married;$("annWrap").hidden=!married;$("ann").value=p.anniversary||"";$("spouseWrap").hidden=!married;
- const sp=ME.relatives.find(r=>r.relation==="spouse");
- $("spouse").innerHTML=relForm("spouse",sp);
+ const sp=ME.relatives.find(r=>r.relation==="spouse");const L=ME.link_requests,LS=ME.linked_spouse;
+ $("links").innerHTML=L.incoming.map(l=>'<div class="card stack" style="margin-top:12px;border-color:var(--accent)"><div><b>'+h(l.display_name)+'</b> says you are their spouse.</div><p class="hint">Accepting links your accounts: children and your anniversary will be shared.</p><div class="row"><button class="btn primary" data-id="'+l.id+'" onclick="linkAct(this.dataset.id,1)">Accept</button><button class="btn" data-id="'+l.id+'" onclick="linkAct(this.dataset.id,0)">Decline</button></div></div>').join("")
+  +L.outgoing.map(l=>'<div class="item" style="margin-top:12px"><div><div class="t">Waiting for '+h(l.display_name)+'</div><div class="m">They need to confirm the spouse link</div></div><button class="btn" data-id="'+l.id+'" onclick="linkAct(this.dataset.id,0)">Cancel</button></div>').join("");
+ $("married").disabled=!!LS;
+ $("spouse").innerHTML=LS?'<div class="item"><div><div class="t">'+h(LS.display_name)+'</div><div class="m">Linked account'+(LS.birth_month?" · birthday "+fmtBirth(LS):"")+'</div></div><span class="pill">Linked</span></div><p class="hint" style="margin-top:8px">You share children and your anniversary. Each of you manages your own profile.</p>':relForm("spouse",sp);
  $("kids").checked=p.has_kids;$("kidsWrap").hidden=!p.has_kids;
  const kids=ME.relatives.filter(r=>r.relation==="child");
  $("kidsList").innerHTML=kids.map(k=>'<details class="item" style="display:block"><summary style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;min-height:44px"><span><span class="t">'+h(k.first_name+" "+(k.last_name||""))+'</span><br><span class="m">'+fmtBirth(k)+'</span></span><span class="m">Edit</span></summary>'+relForm("child",k)+"</details>").join("");
@@ -131,8 +137,14 @@ function render(){const p=ME.profile;
 function relForm(kind,r){r=r||{};const id=r.id?r.id:"";
  return '<form class="card stack" style="margin-top:8px" onsubmit="saveRel(event,\\''+kind+'\\','+(id||"null")+')">'
   +(kind==="spouse"?'<div class="row"><div style="flex:0 1 140px"><label class="f">Title</label><select name="title">'+titleOpts(r.title)+'</select></div><div><label class="f">First name</label><input name="first_name" required value="'+h(r.first_name)+'"></div></div>':'<div><label class="f">First name</label><input name="first_name" required value="'+h(r.first_name)+'"></div>')
-  +'<div><label class="f">Last name</label><input name="last_name" value="'+h(r.last_name)+'"></div><div class="relBday" data-req="'+(kind==="child"?1:"")+'" data-m="'+(r.birth_month||"")+'" data-d="'+(r.birth_day||"")+'" data-y="'+(r.birth_year||"")+'"></div>'
+  +'<div><label class="f">Last name</label><input name="last_name" value="'+h(r.last_name)+'"></div>'
+  +(kind==="spouse"?'<div><label class="f">Phone <span class="opt">optional</span></label><input name="phone" inputmode="tel" oninput="opHint(this)" value="'+h(r.phone?"+"+r.phone:"")+'"><p class="hint op"></p></div><div><label class="f">Alternative phone <span class="opt">optional</span></label><input name="phone_alt" inputmode="tel" oninput="opHint(this)" value="'+h(r.phone_alt?"+"+r.phone_alt:"")+'"><p class="hint op"></p></div><div><label class="f">Email <span class="opt">optional</span></label><input name="email" type="email" value="'+h(r.email)+'"></div>'+(id?"":'<p class="hint">If your spouse already has an account with this phone or email, we will ask them to confirm and link your family.</p>'):"")
+  +'<div class="relBday" data-req="'+(kind==="child"?1:"")+'" data-m="'+(r.birth_month||"")+'" data-d="'+(r.birth_day||"")+'" data-y="'+(r.birth_year||"")+'"></div>'
   +'<div class="row"><button class="btn primary">'+(id?"Save":"Add spouse")+'</button>'+(id?'<button type="button" class="btn danger" onclick="delRel('+id+')">Remove</button>':"")+"</div></form>"}
+async function linkAct(id,accept){try{await api("/api/me/links/"+id+(accept?"/accept":"/decline"),"POST");toast(accept?"Accounts linked":"Done");refresh()}catch(x){toast(x.message,true)}}
+function opOf(v){let d=String(v||"").replace(/[^0-9+]/g,"");if(d[0]==="+")d=d.slice(1);else if(d.slice(0,2)==="00")d=d.slice(2);else if(d[0]==="0")d="256"+d.slice(1);else if(d.length===9)d="256"+d;
+ if(d.length<6)return"";if(d.slice(0,3)!=="256")return"Other";const n=d.slice(3);if(/^7[6-9]/.test(n)||/^3/.test(n))return"MTN";if(/^7[045]/.test(n)||/^73[01]/.test(n)||/^20/.test(n))return"Airtel";return"Other"}
+function opHint(i){const p=i.parentNode.querySelector(".op");if(p)p.textContent=opOf(i.value)?"Network: "+opOf(i.value):""}
 function show(v){document.querySelectorAll(".view").forEach(e=>e.classList.toggle("on",e.id==="v-"+v));document.querySelectorAll("#nav button").forEach(b=>b.setAttribute("aria-current",b.dataset.v===v?"page":"false"));history.replaceState(null,"","#"+v);scrollTo(0,0)}
 async function doSignup(e){e.preventDefault();const f=e.target;if(!f.reportValidity())return;try{await api("/api/auth/signup","POST",formObj(f));toast("Welcome!");boot()}catch(x){toast(x.message,true)}}
 async function doLogin(e){e.preventDefault();try{await api("/api/auth/login","POST",formObj(e.target));boot()}catch(x){toast(x.message,true)}}
@@ -142,7 +154,7 @@ async function saveProfile(e){e.preventDefault();const b=formObj(e.target);if(!M
 async function changePw(e){e.preventDefault();try{await api("/api/me/password","POST",formObj(e.target));e.target.reset();toast("Password changed")}catch(x){toast(x.message,true)}}
 async function setMarried(on){if(!on&&ME.relatives.some(r=>r.relation==="spouse")&&!confirm("This removes your spouse's details and photos. Continue?")){$("married").checked=true;return}
  patchMe({marital_status:on?"married":"single"},on?"Now add your spouse and anniversary":"Saved")}
-async function saveRel(e,kind,id){e.preventDefault();const b=formObj(e.target);try{if(id)await api("/api/me/relatives/"+id,"PATCH",b);else await api("/api/me/relatives","POST",{...b,relation:kind});toast("Saved");refresh()}catch(x){toast(x.message,true)}}
+async function saveRel(e,kind,id){e.preventDefault();const b=formObj(e.target);try{if(id)await api("/api/me/relatives/"+id,"PATCH",b);else{const r=await api("/api/me/relatives","POST",{...b,relation:kind});if(r&&r.link_requested){toast("Request sent. Your spouse needs to confirm.");refresh();return}}toast("Saved");refresh()}catch(x){toast(x.message,true)}}
 async function addRel(e,kind){e.preventDefault();try{await api("/api/me/relatives","POST",{...formObj(e.target),relation:kind});e.target.reset();e.target.querySelector(".kidBday").innerHTML="";toast("Child added");refresh()}catch(x){toast(x.message,true)}}
 async function delRel(id){if(!confirm("Remove this person and their photos?"))return;await api("/api/me/relatives/"+id,"DELETE");toast("Removed");refresh()}
 async function delPhoto(id){if(!confirm("Delete this photo?"))return;await api("/api/me/photos/"+id,"DELETE");refresh()}

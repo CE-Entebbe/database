@@ -55,7 +55,7 @@ export function parseBirth(b: Record<string, unknown>, cur: Birth | null, requir
     if (!m) throw new Error("Please enter a valid date of birth");
     b = { birth_year: m[1], birth_month: m[2], birth_day: m[3] };
   } else if (!has("birth_month") && !has("birth_day") && !has("birth_year")) {
-    const keep = cur ?? { birth_month: null, birth_day: null, birth_year: null };
+    const keep = { birth_month: cur?.birth_month ?? null, birth_day: cur?.birth_day ?? null, birth_year: cur?.birth_year ?? null };
     if (required && !keep.birth_month) throw new Error("Birthday (month and day) is required");
     return keep;
   }
@@ -81,3 +81,13 @@ export function parseBirth(b: Record<string, unknown>, cur: Birth | null, requir
 /** Sortable/occurrence key; unknown year uses leap year 2000 so Feb 29 is representable. */
 export const birthIso = (r: Birth) => r.birth_month && r.birth_day
   ? `${r.birth_year ?? 2000}-${String(r.birth_month).padStart(2, "0")}-${String(r.birth_day).padStart(2, "0")}` : null;
+
+/** Ugandan operator from a normalised number (UCC allocations, verified Oct 2026). */
+export function phoneOperator(p: string | null): "MTN" | "Airtel" | "Other" | null {
+  if (!p) return null;
+  if (!p.startsWith("256") || p.length !== 12) return "Other";
+  const n = p.slice(3);
+  if (/^7[6-9]/.test(n) || /^3/.test(n)) return "MTN";              // 076-079 mobile, 03x MTN fixed
+  if (/^7[045]/.test(n) || /^73[01]/.test(n) || /^20/.test(n)) return "Airtel"; // 070/074/075, 0730-0731, 020 fixed
+  return "Other";
+}

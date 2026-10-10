@@ -17,6 +17,20 @@ The app collects member details so the church can send e-cards for **birthdays**
 - **Photos:** a gallery for the member, their spouse and each child. Photos are resized on the phone to at most 1600 px, stored in R2 and wait for admin approval. Up to 60 photos per member, JPEG/PNG/WebP, 2 MB maximum each.
 - Duplicate phone numbers and emails are rejected. Phones are stored as digits with the 256 country code.
 
+## Phones, networks and households
+- **Alternative phone:** members and spouse records can store an optional second number. Every number is saved as `256XXXXXXXXX`.
+- **Network detection:** each number is tagged with its network, based on UCC allocations checked in October 2026:
+  - **MTN:** 076–079 mobile and 03x fixed lines.
+  - **Airtel:** 070, 074, 075 and 0730–0731 mobile, and 020 fixed lines.
+  - **Other:** everything else, including Lyca 072 and foreign numbers.
+- **Admin tools:** the Members tab can filter and sort by network. **Export CSV** (`/api/admin/phones.csv`) lists every number, one row per number (members, alternative numbers and spouse records), grouped MTN, Airtel, Other.
+- **One person per phone or email:** a phone number (primary or alternative) or email belongs to exactly one person, whether a member or a spouse record. The database enforces this through the `identifiers` table and triggers.
+- **Households:** children and the wedding anniversary belong to a household. Two spouse accounts are linked into one household:
+  - **Adding a spouse:** if the spouse's phone or email matches an existing account, that person gets a request in their Family tab to confirm.
+  - **Spouse signing up later:** if someone signs up with a number from another member's spouse record, that member is asked to confirm.
+  - **When linked:** households merge. Duplicate children (same first name and birthday) are combined, and the spouse record is replaced by the real account, along with its photos. Both parents can edit the children.
+  - **Admin:** admins can link or unlink spouses directly from the member editor.
+
 ## Admin (`/admin`)
 - **Celebrate** (home tab): birthdays of members, spouses and children, plus wedding anniversaries, for Today, the next 7 days or This month, with an optional church filter. Each entry has a **Make e-card** button.
 - **E-card:** a 1080×1080 PNG (square, good for WhatsApp) drawn in the browser. It shows the chosen approved photo (or initials), "Happy Birthday" or "Happy Wedding Anniversary", "Title First-name" (or "Brother John & Sister Mary" for couples), an editable blessing line and the church name. **Download PNG**, or **Share** through the Web Share API on phones.
