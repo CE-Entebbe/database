@@ -1,4 +1,4 @@
-import { head } from "./styles";
+import { head, MARK, UI_JS } from "./styles";
 import { BDAY_JS } from "./bday";
 const TITLE_OPTS = `<option value="">None</option><option>Brother</option><option>Sister</option><option>Pastor</option><option>Deacon</option><option>Deaconess</option>`;
 // Single-page admin UI. Served behind basic auth; the browser re-sends the
@@ -12,8 +12,8 @@ const NAV: [string, string, string][] = [
   ["more", "More", icon('<circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/>')],
 ];
 
-export const adminPage = () => `${head("CE Admin")}<body>
-<header class="top"><div class="in"><div class="brand">CE <span>Admin</span></div>
+export const adminPage = () => `${head("CE Admin", "/admin/manifest.webmanifest")}<body>
+<header class="top"><div class="in"><div class="brand">${MARK}<div>CE <span>Admin</span></div></div>
 <select id="church" aria-label="Working church" style="width:auto;min-width:150px;max-width:55vw" onchange="loadChurch()"></select></div></header>
 <nav class="bottom" aria-label="Sections">${NAV.map(([id, label, ic]) => `<button data-v="${id}" onclick="show('${id}')">${ic}<span>${label}</span></button>`).join("")}</nav>
 <main class="wrap">
@@ -31,7 +31,9 @@ export const adminPage = () => `${head("CE Admin")}<body>
 <section class="view" id="v-members"><h1>Members</h1><p class="sub">Each member gets a private link to choose their cell.</p>
  <form class="card stack" onsubmit="addMember(event)"><div class="row"><select id="mTitle" aria-label="Title" style="flex:0 1 130px">${TITLE_OPTS}</select><input id="mFirst" placeholder="First name" required aria-label="First name"><input id="mLast" placeholder="Last name" aria-label="Last name"></div>
  <div id="mBday"></div>
- <div class="row"><input id="mPhone" placeholder="Phone (optional)" inputmode="tel" aria-label="Phone"><input id="mEmail" type="email" placeholder="Email (optional)" aria-label="Email"></div>
+ <input id="mPhone" name="phone" placeholder="Phone (optional)" inputmode="tel" aria-label="Phone">
+ <div class="reveal" data-alt-for="phone"><div><input id="mPhone2" name="phone_alt" placeholder="Alternative phone (optional)" inputmode="tel" aria-label="Alternative phone"></div></div>
+ <input id="mEmail" type="email" placeholder="Email (optional)" aria-label="Email">
  <button class="btn primary block">Add member</button></form>
  <h2>All members <span class="m" id="mCount"></span></h2><input id="mSearch" placeholder="Search…" aria-label="Search members" oninput="renderMembers()" style="margin-bottom:10px">
  <div class="chips" role="group" aria-label="Network" style="margin-bottom:10px"><button data-op="" onclick="setOp('')">All</button><button data-op="MTN" onclick="setOp('MTN')">MTN</button><button data-op="Airtel" onclick="setOp('Airtel')">Airtel</button><button data-op="Other" onclick="setOp('Other')">Other</button><button id="sortOp" onclick="SORTOP=!SORTOP;renderMembers()">Sort by network</button><button onclick="exportCsv()">Export CSV</button></div>
@@ -61,6 +63,7 @@ export const adminPage = () => `${head("CE Admin")}<body>
 <dialog id="dlg"><div class="dh"><b id="dlgTitle"></b><button class="btn" onclick="$('dlg').close()" aria-label="Close">Close</button></div><div class="db" id="dlgBody"></div></dialog>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <script>
+${UI_JS}
 ${BDAY_JS}
 const ROLES={COORDINATOR:"Coordinator",PCF_LEADER:"PCF leader",ASST_PCF_LEADER:"Assistant PCF leader",CELL_LEADER:"Cell leader",ASST_CELL_LEADER:"Assistant cell leader",BIBLE_STUDY_TEACHER:"Bible study teacher"};
 let S={churches:[],pcfs:[],cells:[],members:[],roles:[]};
@@ -73,7 +76,7 @@ const opt=(v,t,sel)=>'<option value="'+v+'"'+(sel?" selected":"")+">"+h(t)+"</op
 const item=(o,title,meta,acts)=>'<div class="item'+(o&&o.active===0?" off":"")+'"><div><div class="t">'+title+'</div>'+(meta?'<div class="m">'+meta+"</div>":"")+'</div><div class="acts">'+acts+"</div></div>";
 const tog=(kind,o)=>'<button class="btn" onclick="toggle(\\''+kind+'\\','+o.id+','+(o.active?0:1)+')">'+(o.active?"Deactivate":"Activate")+"</button>";
 const ren=(kind,o)=>'<button class="btn" data-n="'+h(o.name)+'" onclick="rename(\\''+kind+'\\','+o.id+',this.dataset.n)">Rename</button>';
-const empty=t=>'<div class="empty">'+t+"</div>";
+const empty=(t,k)=>emptyState(t,k);
 function show(v){if(v==='celebrate')loadCel();if(v==='review')loadQueue();document.querySelectorAll(".view").forEach(e=>e.classList.toggle("on",e.id==="v-"+v));const nv=["roles","churches","settings"].includes(v)?"more":v;document.querySelectorAll("nav.bottom button").forEach(b=>b.setAttribute("aria-current",b.dataset.v===nv?"page":"false"));location.hash=v;scrollTo(0,0)}
 async function toggle(kind,id,active){await api("/"+kind+"/"+id,"PATCH",{active:!!active});toast(active?"Activated":"Deactivated");kind==="churches"?init():loadChurch()}
 async function rename(kind,id,old){const n=prompt("New name",old);if(n&&n!==old){await api("/"+kind+"/"+id,"PATCH",{name:n});toast("Renamed");kind==="churches"?init():loadChurch()}}
@@ -102,7 +105,7 @@ function renderMembers(){document.querySelectorAll("[data-op]").forEach(b=>b.set
  const cellOpts=sel=>opt("","No cell")+S.cells.filter(x=>x.active||x.id===sel).map(x=>opt(x.id,x.name,x.id===sel)).join("");
  $("members").innerHTML=list.length?list.map(m=>'<div class="item'+(m.active?"":" off")+'" style="flex-direction:column;align-items:stretch"><div style="display:flex;justify-content:space-between;gap:10px"><div><div class="t">'+h(m.name)+'</div><div class="m">'+([num(m.phone,m.phone_operator),num(m.phone_alt,m.phone_alt_operator),h(m.email||"")].filter(Boolean).join(" · ")||"No contact")+(m.spouse_member_name?" · spouse: "+h(m.spouse_member_name):"")+(m.pcf_name?" · "+h(m.pcf_name):"")+'</div></div></div>'
   +'<select aria-label="Cell for '+h(m.name)+'" onchange="setCell('+m.id+',this.value)">'+cellOpts(m.cell_id)+'</select>'
-  +'<div class="acts" style="justify-content:flex-start"><button class="btn primary" onclick="editMember('+m.id+')">Open</button><button class="btn" onclick="copyLink(\\''+m.access_code+'\\')">Copy link</button><button class="btn" onclick="resetCode('+m.id+')">New link</button>'+tog("members",m)+'<button class="btn danger" onclick="delMember('+m.id+')">Delete</button></div></div>').join(""):empty(S.members.length?"No matches.":"No members yet.");}
+  +'<div class="acts" style="justify-content:flex-start"><button class="btn primary" onclick="editMember('+m.id+')">Open</button><button class="btn" onclick="copyLink(\\''+m.access_code+'\\')">Copy link</button><button class="btn" onclick="resetCode('+m.id+')">New link</button>'+tog("members",m)+'<button class="btn danger" onclick="delMember('+m.id+')">Delete</button></div></div>').join(""):empty(S.members.length?"No matches.":"No members yet.","people");}
 async function loadChurch(){
  const c=cid();[S.pcfs,S.cells,S.members,S.roles]=await Promise.all([api("/pcfs?church_id="+c),api("/cells?church_id="+c),api("/members?church_id="+c),api("/roles")]);
  $("pcfs").innerHTML=S.pcfs.length?S.pcfs.map(p=>{const cs=S.cells.filter(x=>x.pcf_id===p.id);return '<h2>'+h(p.name)+' <span class="pill">'+cs.length+' cells</span>'+(p.active?"":' <span class="pill">inactive</span>')+'</h2><div class="acts" style="display:flex;gap:6px;margin-bottom:10px">'+ren("pcfs",p)+tog("pcfs",p)+'</div><div class="list">'
@@ -121,7 +124,7 @@ function roleScope(){const r=$("rRole").value;
  $("rScope").innerHTML=r.includes("PCF")?S.pcfs.filter(p=>p.active).map(p=>opt("p"+p.id,p.name)).join(""):r.includes("CELL")?S.cells.filter(x=>x.active).map(x=>opt("c"+x.id,x.name)).join(""):opt("","Not applicable");$("rScope").disabled=!r.includes("PCF")&&!r.includes("CELL")}
 async function addPcf(e){e.preventDefault();await api("/pcfs","POST",{church_id:cid(),name:$("pcfName").value});$("pcfName").value="";toast("PCF added");loadChurch()}
 async function addCell(e,pcf){e.preventDefault();await api("/cells","POST",{pcf_id:pcf,name:e.target.n.value});toast("Cell added");loadChurch()}
-async function addMember(e){e.preventDefault();await api("/members","POST",{church_id:cid(),title:$("mTitle").value,first_name:$("mFirst").value,last_name:$("mLast").value,birth_month:$("mBday").querySelector("[name=birth_month]").value,birth_day:$("mBday").querySelector("[name=birth_day]").value,birth_year:$("mBday").querySelector("[name=birth_year]").value,phone:$("mPhone").value,email:$("mEmail").value});["mFirst","mLast","mPhone","mEmail"].forEach(i=>$(i).value="");mountBday($("mBday"),{},false);toast("Member added");loadChurch()}
+async function addMember(e){e.preventDefault();await api("/members","POST",{church_id:cid(),title:$("mTitle").value,first_name:$("mFirst").value,last_name:$("mLast").value,birth_month:$("mBday").querySelector("[name=birth_month]").value,birth_day:$("mBday").querySelector("[name=birth_day]").value,birth_year:$("mBday").querySelector("[name=birth_year]").value,phone:$("mPhone").value,phone_alt:$("mPhone2").value,email:$("mEmail").value});["mFirst","mLast","mPhone","mPhone2","mEmail"].forEach(i=>$(i).value="");syncAlt();mountBday($("mBday"),{},false);toast("Member added");loadChurch()}
 async function setCell(id,v){try{await api("/members/"+id,"PATCH",{cell_id:v?Number(v):null});toast("Cell updated")}catch{}loadChurch()}
 async function copyLink(code){const u=location.origin+"/m/"+code;try{await navigator.clipboard.writeText(u);toast("Link copied")}catch{prompt("Member link",u)}}
 async function resetCode(id){if(confirm("The old link will stop working. Continue?")){await api("/members/"+id+"/reset-code","POST");toast("New link created");loadChurch()}}
@@ -142,22 +145,22 @@ function openDlg(title,html){$("dlgTitle").textContent=title;$("dlgBody").innerH
 // ---- celebrations ----
 let RANGE="week",CEL=[];
 function setRange(r){RANGE=r;loadCel()}
-async function loadCel(){document.querySelectorAll("[data-r]").forEach(b=>b.setAttribute("aria-pressed",b.dataset.r===RANGE));
+async function loadCel(){if(!CEL.length)$("cel").innerHTML=skeleton(3);document.querySelectorAll("[data-r]").forEach(b=>b.setAttribute("aria-pressed",b.dataset.r===RANGE));
  const ch=$("celChurch").value;const d=await api("/celebrations?range="+RANGE+(ch?"&church_id="+ch:""));CEL=d.items;
  const label={today:"today",week:"in the next 7 days",month:"this month"}[RANGE];
  $("celSub").textContent=CEL.length+" celebration"+(CEL.length===1?"":"s")+" "+label;
  $("cel").innerHTML=CEL.length?CEL.map((c,i)=>{const when=c.days===0?"Today":c.days===1?"Tomorrow":c.days<0?fmtDM(c.date)+" · passed":fmtDM(c.date);
   const kind=c.type==="birthday"?"Birthday":"Wedding anniversary";const yrs=c.type==="anniversary"&&c.years>0?" · "+c.years+(c.years===1?" year":" years"):c.type==="birthday"&&c.years!=null&&c.years>0?" · turns "+c.years:"";
   const av=c.photo_ids.length?'<img alt="" src="/api/admin/photos/'+c.photo_ids[0]+'/image">':h((c.display_name.split(" ").pop()||"?")[0]);
-  return '<div class="item"><div class="cel"><div class="av">'+av+'</div><div><div class="when">'+when+'</div><div class="t">'+h(c.display_name)+'</div><div class="m">'+kind+yrs+(c.context?" · "+h(c.context):"")+" · "+h(c.church_name)+(c.photo_ids.length?"":" · no approved photo")+'</div></div></div><div class="acts"><button class="btn primary" onclick="ecard('+i+')">Make e-card</button></div></div>'}).join(""):empty("Nothing to celebrate "+label+".");}
+  return '<div class="item"><div class="cel"><div class="av">'+av+'</div><div><div class="when">'+when+'</div><div class="t">'+h(c.display_name)+'</div><div class="m">'+kind+yrs+(c.context?" · "+h(c.context):"")+" · "+h(c.church_name)+(c.photo_ids.length?"":" · no approved photo")+'</div></div></div><div class="acts"><button class="btn primary" onclick="ecard('+i+')">Make e-card</button></div></div>'}).join(""):empty("Nothing to celebrate "+label+".","cake");}
 
 // ---- photo review ----
 let PS="pending";
 function setPS(s){PS=s;loadQueue()}
-async function loadQueue(){document.querySelectorAll("[data-s]").forEach(b=>b.setAttribute("aria-pressed",b.dataset.s===PS));
+async function loadQueue(){$("queue").innerHTML='<div class="sk" style="aspect-ratio:1"></div>'.repeat(4);document.querySelectorAll("[data-s]").forEach(b=>b.setAttribute("aria-pressed",b.dataset.s===PS));
  const q=await api("/photos?status="+PS);
  $("queue").innerHTML=q.length?q.map(p=>'<figure class="ph" style="aspect-ratio:auto;background:#fff;border:1px solid var(--line)"><img loading="lazy" style="aspect-ratio:1" src="/api/admin/photos/'+p.id+'/image" alt=""><figcaption style="padding:8px"><div class="t" style="font-size:.85rem;font-weight:600">'+h(p.relative_first_name?p.relative_first_name+" ("+p.relation+" of "+p.member_name+")":p.member_name)+'</div><div class="row" style="margin-top:6px;gap:6px">'
-  +(p.status!=="approved"?'<button class="btn primary" style="flex:1" onclick="review('+p.id+',\\'approved\\')">Approve</button>':"")+(p.status!=="rejected"?'<button class="btn danger" style="flex:1" onclick="review('+p.id+',\\'rejected\\')">Reject</button>':"")+"</div></figcaption></figure>").join(""):empty(PS==="pending"?"All caught up. No photos waiting.":"Nothing here.");}
+  +(p.status!=="approved"?'<button class="btn primary" style="flex:1" onclick="review('+p.id+',\\'approved\\')">Approve</button>':"")+(p.status!=="rejected"?'<button class="btn danger" style="flex:1" onclick="review('+p.id+',\\'rejected\\')">Reject</button>':"")+"</div></figcaption></figure>").join(""):empty(PS==="pending"?"All caught up. No photos waiting.":"Nothing here.",PS==="pending"?"check":"photos");}
 async function review(id,status,thenMember){await api("/photos/"+id,"PATCH",{status});toast(status==="approved"?"Approved":"Rejected");thenMember?editMember(thenMember):loadQueue()}
 
 // ---- member editor ----
@@ -168,7 +171,7 @@ async function editMember(id){const m=await api("/members/"+id);
  openDlg(m.name,'<form class="stack" onsubmit="saveMember(event,'+id+')">'
   +'<div class="row"><div style="flex:0 1 130px"><label class="f">Title</label>'+titleSel("title",m.title)+'</div><div><label class="f">First name</label><input name="first_name" required value="'+h(m.first_name||m.name)+'"></div></div>'
   +'<div><label class="f">Last name</label><input name="last_name" value="'+h(m.last_name)+'"></div>'
-  +'<div class="row"><div><label class="f">Phone'+(m.phone_operator?' <span class="pill">'+m.phone_operator+'</span>':"")+'</label><input name="phone" inputmode="tel" value="'+h(m.phone?"+"+m.phone:"")+'"></div><div><label class="f">Alternative phone'+(m.phone_alt_operator?' <span class="pill">'+m.phone_alt_operator+'</span>':"")+'</label><input name="phone_alt" inputmode="tel" value="'+h(m.phone_alt?"+"+m.phone_alt:"")+'"></div></div>'
+  +'<div class="row"><div><label class="f">Phone'+(m.phone_operator?' <span class="pill">'+m.phone_operator+'</span>':"")+'</label><input name="phone" inputmode="tel" value="'+h(m.phone?"+"+m.phone:"")+'"></div></div><div class="reveal" data-alt-for="phone"><div><label class="f">Alternative phone'+(m.phone_alt_operator?' <span class="pill">'+m.phone_alt_operator+'</span>':"")+'</label><input name="phone_alt" inputmode="tel" value="'+h(m.phone_alt?"+"+m.phone_alt:"")+'"></div></div>'
   +'<div><label class="f">Email</label><input name="email" type="email" value="'+h(m.email)+'"></div>'
   +'<div id="eBday"></div>'
   +'<div class="row"><div><label class="f">Marital status</label><select name="marital_status" onchange="this.form.anniversary.disabled=this.value!==\\'married\\'"><option value="single"'+(m.marital_status!=="married"?" selected":"")+'>Single</option><option value="married"'+(m.marital_status==="married"?" selected":"")+'>Married</option></select></div>'
@@ -182,7 +185,7 @@ async function editMember(id){const m=await api("/members/"+id);
   +'<form class="card stack" style="margin-top:10px" onsubmit="addRelA(event,'+id+')"><div class="row"><select name="relation" aria-label="Relation" onchange="this.form.title.disabled=this.value===\\'child\\'"><option value="child">Child</option><option value="spouse">Spouse</option></select>'+titleSel("title","").replace("<select",'<select disabled aria-label="Title"')+'</div>'
   +'<div class="row"><input name="first_name" placeholder="First name" required aria-label="First name"><input name="last_name" placeholder="Last name" aria-label="Last name"></div><div id="rBday"></div><button class="btn block">Add family member</button></form>'
   +'<h2>Photos</h2>'+(photos?'<div class="grid">'+photos+"</div>":empty("No photos uploaded.")));
- mountBday($("eBday"),m,false);mountBday($("rBday"),{},false);}
+ mountBday($("eBday"),m,false);mountBday($("rBday"),{},false);syncAlt($("dlgBody"));}
 async function linkSp(e,id){e.preventDefault();const o=e.target.other.value;if(!o)return;if(!confirm("Link these two members as spouses? Their children and anniversary will be shared."))return;try{await api("/members/"+id+"/link-spouse","POST",{member_id:Number(o)});toast("Linked");loadChurch();editMember(id)}catch{}}
 async function unlinkSp(id){if(!confirm("Unlink this member from their spouse? Children and the anniversary stay with the spouse."))return;try{await api("/members/"+id+"/unlink-spouse","POST");toast("Unlinked");loadChurch();editMember(id)}catch{}}
 async function saveMember(e,id){e.preventDefault();const b=fObj(e.target);b.has_kids=e.target.has_kids.checked;if(b.marital_status!=="married")b.anniversary="";
@@ -207,10 +210,10 @@ async function pickPhoto(p){EC.photo=p||null;EC.img=null;document.querySelectorA
  await document.fonts.ready;drawCard()}
 function wrap(x,text,cx,y,maxW,lh){const words=text.split(" ");let line="",lines=[];for(const w of words){const t=line?line+" "+w:w;if(x.measureText(t).width>maxW&&line){lines.push(line);line=w}else line=t}lines.push(line);lines.slice(0,3).forEach((l,i)=>x.fillText(l,cx,y+i*lh));}
 function drawCard(){const cv=$("cv");if(!cv)return;const x=cv.getContext("2d"),W=1080,c=EC.c,bd=c.type==="birthday";
- const g=x.createLinearGradient(0,0,W,W);if(bd){g.addColorStop(0,"#1e1b4b");g.addColorStop(1,"#4338ca")}else{g.addColorStop(0,"#1f1a17");g.addColorStop(1,"#6b4f2a")}
+ const g=x.createLinearGradient(0,0,W,W);if(bd){g.addColorStop(0,"#5a1f3d");g.addColorStop(.55,"#9c3d62");g.addColorStop(1,"#d9714f")}else{g.addColorStop(0,"#2a1520");g.addColorStop(.6,"#5a2a3a");g.addColorStop(1,"#8a5a3a")}
  x.fillStyle=g;x.fillRect(0,0,W,W);
  x.globalAlpha=.08;x.fillStyle="#fff";[[120,140,180],[960,220,120],[900,940,220],[160,980,90]].forEach(([a,b,r])=>{x.beginPath();x.arc(a,b,r,0,7);x.fill()});x.globalAlpha=1;
- const gold=bd?"#c7d2fe":"#e9c98b";
+ const gold=bd?"#ffe2cf":"#ecd29a";
  x.strokeStyle=gold;x.globalAlpha=.5;x.lineWidth=2;x.strokeRect(40,40,W-80,W-80);x.globalAlpha=1;
  const cx=W/2,cy=360,R=210;
  x.save();x.beginPath();x.arc(cx,cy,R,0,7);x.closePath();x.clip();

@@ -288,6 +288,20 @@ describe("accounts, family, photos, celebrations", () => {
     expect(d.text).not.toContain("pbkdf2");
   });
 
+  it("is an installable PWA (manifest, icons, service worker)", async () => {
+    const m = await call("/manifest.webmanifest", { auth: null });
+    expect(m.json).toMatchObject({ display: "standalone", start_url: "/" });
+    expect(m.json.icons.map((i: any) => i.sizes)).toEqual(expect.arrayContaining(["192x192", "512x512"]));
+    for (const i of ["/icon-192.png", "/icon-512.png", "/icon-maskable-512.png", "/icon-180.png"]) {
+      const r = await mf.dispatchFetch(`http://x${i}`); expect(r.headers.get("content-type")).toBe("image/png");
+      expect(new Uint8Array(await r.arrayBuffer()).slice(1, 4)).toEqual(new Uint8Array([80, 78, 71]));
+    }
+    expect((await call("/sw.js", { auth: null })).text).toContain("fetch");
+    expect((await call("/admin/manifest.webmanifest", { auth: null })).status).toBe(401);
+    const home = (await call("/", { auth: null })).text;
+    expect(home).toContain('rel="manifest"'); expect(home).toContain("Step 1 of 4"); expect(home).toContain('data-alt-for="phone"');
+  });
+
   it("serves the account page at /", async () => {
     const r = await call("/", { auth: null });
     expect(r.text).toContain("Create account");

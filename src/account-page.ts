@@ -1,35 +1,45 @@
-import { head } from "./styles";
+import { head, MARK, UI_JS } from "./styles";
 import { BDAY_JS } from "./bday";
 
 const TITLE_OPTS = `<option value="">None</option><option>Brother</option><option>Sister</option><option>Pastor</option><option>Deacon</option><option>Deaconess</option>`;
 
 export const accountPage = () => `${head("CE Membership")}<body>
-<header class="top"><div class="in"><div class="brand">CE <span>Membership</span></div><button class="btn" id="logout" hidden onclick="logout()">Log out</button></div></header>
+<header class="top" id="topbar" hidden><div class="in"><div class="brand">${MARK}<div>CE <span>Entebbe</span></div></div><button class="btn ghost" id="logout" onclick="logout()" aria-label="Log out"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4h3a2 2 0 012 2v12a2 2 0 01-2 2h-3M10 17l5-5-5-5M15 12H4"/></svg></button></div></header>
 <main class="wrap">
+<div id="booting" style="padding-top:24px"><div class="sk" style="height:28px;width:60%;margin-bottom:12px"></div><div class="sk" style="height:16px;width:85%;margin-bottom:24px"></div><div class="list">${"<div class=\"sk sk-item\"></div>".repeat(4)}</div></div>
 
 <section id="auth" hidden>
- <h1>Welcome</h1><p class="sub">Join the CE Entebbe family so we can celebrate your special days with you.</p>
+ <div class="hero">${MARK.replace('class="mark"', 'class="mark" style="font-size:18px"')}
+  <h1>Celebrating every member</h1><p>Join the CE Entebbe family so we can celebrate your birthday and anniversary with you.</p></div>
+ <div class="auth-card card">
  <div class="seg" role="tablist"><button role="tab" id="tSignup" aria-selected="true" onclick="authTab('signup')">Create account</button><button role="tab" id="tLogin" aria-selected="false" onclick="authTab('login')">Log in</button></div>
- <form id="signup" class="card stack" onsubmit="doSignup(event)" novalidate>
-  <div class="row"><div style="flex:0 1 140px"><label class="f" for="sTitle">Title</label><select id="sTitle" name="title">${TITLE_OPTS}</select></div>
-  <div><label class="f" for="sFirst">First name</label><input id="sFirst" name="first_name" required autocomplete="given-name"></div></div>
-  <div><label class="f" for="sLast">Last name</label><input id="sLast" name="last_name" required autocomplete="family-name"></div>
-  <p class="hint" id="preview"></p>
-  <div><label class="f" for="sPhone">Phone</label><input id="sPhone" name="phone" required inputmode="tel" autocomplete="tel" placeholder="07XX XXX XXX" oninput="opHint(this)"><p class="hint op"></p></div>
-  <div><label class="f" for="sPhone2">Alternative phone <span class="opt">optional</span></label><input id="sPhone2" name="phone_alt" inputmode="tel" placeholder="07XX XXX XXX" oninput="opHint(this)"><p class="hint op"></p></div>
-  <div><label class="f" for="sEmail">Email <span class="opt">optional</span></label><input id="sEmail" name="email" type="email" autocomplete="email"></div>
-  <div id="sBday"></div>
-  <div><label class="f" for="sChurch">Church</label><select id="sChurch" name="church_id" required onchange="loadCells(this.value,'sCell','sCellWrap')"></select></div>
-  <div id="sCellWrap" hidden><label class="f" for="sCell">Cell <span class="opt">optional</span></label><select id="sCell" name="cell_id"></select></div>
-  <div><label class="f" for="sPass">Password</label><input id="sPass" name="password" type="password" minlength="8" required autocomplete="new-password" placeholder="At least 8 characters"></div>
-  <button class="btn primary block">Create account</button>
+ <form id="signup" onsubmit="doSignup(event)" novalidate>
+  <div class="progress" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+  <div class="step stack" data-step="1"><div class="steplabel">Step 1 of 4 · About you</div>
+   <div class="fl"><select id="sTitle" name="title">${TITLE_OPTS}</select><label for="sTitle">Title</label></div>
+   <div class="fl"><input id="sFirst" name="first_name" required autocomplete="given-name" placeholder=" "><label for="sFirst">First name</label></div>
+   <div class="fl"><input id="sLast" name="last_name" required autocomplete="family-name" placeholder=" "><label for="sLast">Last name</label></div>
+   <p class="hint" id="preview"></p></div>
+  <div class="step stack" data-step="2"><div class="steplabel">Step 2 of 4 · Contact</div>
+   <div class="fl"><input id="sPhone" name="phone" required inputmode="tel" autocomplete="tel" placeholder=" " oninput="opHint(this)"><label for="sPhone">Phone number</label><p class="hint op"></p></div>
+   <div class="reveal" data-alt-for="phone"><div><div class="fl"><input id="sPhone2" name="phone_alt" inputmode="tel" placeholder=" " oninput="opHint(this)"><label for="sPhone2">Alternative phone (optional)</label><p class="hint op"></p></div></div></div>
+   <div class="fl"><input id="sEmail" name="email" type="email" autocomplete="email" placeholder=" "><label for="sEmail">Email (optional)</label></div></div>
+  <div class="step stack" data-step="3"><div class="steplabel">Step 3 of 4 · Birthday &amp; church</div>
+   <div id="sBday"></div>
+   <div class="fl"><select id="sChurch" name="church_id" required onchange="loadCells(this.value,'sCell','sCellWrap')"></select><label for="sChurch">Church</label></div>
+   <div id="sCellWrap" class="fl" hidden><select id="sCell" name="cell_id"></select><label for="sCell">Cell (optional)</label></div></div>
+  <div class="step stack" data-step="4"><div class="steplabel">Step 4 of 4 · Secure your account</div>
+   <div class="fl"><input id="sPass" name="password" type="password" minlength="8" required autocomplete="new-password" placeholder=" "><label for="sPass">Password (8+ characters)</label></div>
+   <p class="hint">You'll log in with your phone number or email and this password.</p></div>
+  <div class="wiz-nav" style="margin-top:16px"><button type="button" class="btn ghost" id="wBack" onclick="wiz(-1)">Back</button><button type="button" class="btn primary block" id="wNext" onclick="wiz(1)">Continue</button></div>
  </form>
- <form id="login" class="card stack" onsubmit="doLogin(event)" hidden>
-  <div><label class="f" for="lLogin">Phone or email</label><input id="lLogin" name="login" required autocomplete="username"></div>
-  <div><label class="f" for="lPass">Password</label><input id="lPass" name="password" type="password" required autocomplete="current-password"></div>
+ <form id="login" class="stack" onsubmit="doLogin(event)" hidden>
+  <div class="fl"><input id="lLogin" name="login" required autocomplete="username" placeholder=" "><label for="lLogin">Phone or email</label></div>
+  <div class="fl"><input id="lPass" name="password" type="password" required autocomplete="current-password" placeholder=" "><label for="lPass">Password</label></div>
   <button class="btn primary block">Log in</button>
-  <p class="hint">Forgot your password? Ask your church admin.</p>
+  <p class="hint" style="text-align:center">Forgot your password? Ask your church admin.</p>
  </form>
+ </div>
 </section>
 
 <section id="app" hidden>
@@ -40,7 +50,7 @@ export const accountPage = () => `${head("CE Membership")}<body>
    <div><label class="f" for="pFirst">First name</label><input id="pFirst" name="first_name" required></div></div>
    <div><label class="f" for="pLast">Last name</label><input id="pLast" name="last_name"></div>
    <div><label class="f" for="pPhone">Phone</label><input id="pPhone" name="phone" inputmode="tel" required oninput="opHint(this)"><p class="hint op"></p></div>
-   <div><label class="f" for="pPhone2">Alternative phone <span class="opt">optional</span></label><input id="pPhone2" name="phone_alt" inputmode="tel" oninput="opHint(this)"><p class="hint op"></p></div>
+   <div class="reveal" data-alt-for="phone"><div><label class="f" for="pPhone2">Alternative phone <span class="opt">optional</span></label><input id="pPhone2" name="phone_alt" inputmode="tel" oninput="opHint(this)"><p class="hint op"></p></div></div>
    <div><label class="f" for="pEmail">Email <span class="opt">optional</span></label><input id="pEmail" name="email" type="email"></div>
    <div id="pBday"></div>
    <div id="pCellWrap" hidden><label class="f" for="pCell">My cell <span class="opt">optional</span></label><select id="pCell" name="cell_id"></select></div>
@@ -86,6 +96,7 @@ export const accountPage = () => `${head("CE Membership")}<body>
 </nav>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <script>
+${UI_JS}
 ${BDAY_JS}
 const $=id=>document.getElementById(id);
 const h=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]);
@@ -108,7 +119,7 @@ async function loadCells(church,sel,wrap,current){const cells=await api("/api/pu
 mountBday($("sBday"),{},true);
 async function boot(){
  try{ME=await api("/api/me")}catch(e){ME=null}
- $("auth").hidden=!!ME;$("app").hidden=!ME;$("nav").hidden=!ME;$("logout").hidden=!ME;
+ const bt=$("booting");if(bt)bt.remove();$("auth").hidden=!!ME;$("app").hidden=!ME;$("nav").hidden=!ME;$("topbar").hidden=!ME;
  if(!ME){const o=await api("/api/public/churches");$("sChurch").innerHTML=o.churches.length?o.churches.map(c=>'<option value="'+c.id+'">'+h(c.name)+"</option>").join(""):'<option value="">No churches yet</option>';
   if(o.churches.length)loadCells(o.churches[0].id,"sCell","sCellWrap");return}
  render();show(location.hash.slice(1)||"profile");
@@ -132,13 +143,13 @@ function render(){const p=ME.profile;
  const who=[["","Me"]].concat(ME.relatives.map(r=>[r.id,(r.relation==="spouse"?"Spouse: ":"")+r.first_name]));
  const cur=$("who").value;$("who").innerHTML=who.map(([v,t])=>'<option value="'+v+'"'+(String(v)===cur?" selected":"")+">"+h(t)+"</option>").join("");
  const groups=who.map(([v,t])=>[t,ME.photos.filter(ph=>String(ph.relative_id??"")===String(v))]).filter(g=>g[1].length);
- $("gallery").innerHTML=groups.length?groups.map(([t,ps])=>"<h2>"+h(t)+'</h2><div class="grid">'+ps.map(ph=>'<figure class="ph"><img loading="lazy" src="/api/me/photos/'+ph.id+'" alt=""><span class="badge '+ph.status+'">'+({pending:"In review",approved:"Approved",rejected:"Not used"})[ph.status]+'</span><button class="x" aria-label="Delete photo" onclick="delPhoto('+ph.id+')">×</button></figure>').join("")+"</div>").join(""):'<div class="empty" style="margin-top:16px">No photos yet.</div>';
+ syncAlt();$("gallery").innerHTML=groups.length?groups.map(([t,ps])=>"<h2>"+h(t)+'</h2><div class="grid">'+ps.map(ph=>'<figure class="ph"><img loading="lazy" src="/api/me/photos/'+ph.id+'" alt=""><span class="badge '+ph.status+'">'+({pending:"In review",approved:"Approved",rejected:"Not used"})[ph.status]+'</span><button class="x" aria-label="Delete photo" onclick="delPhoto('+ph.id+')">×</button></figure>').join("")+"</div>").join(""):'<div style="margin-top:16px">'+emptyState("No photos yet. Add a few clear photos for your celebration cards.","photos")+'</div>';
 }
 function relForm(kind,r){r=r||{};const id=r.id?r.id:"";
  return '<form class="card stack" style="margin-top:8px" onsubmit="saveRel(event,\\''+kind+'\\','+(id||"null")+')">'
   +(kind==="spouse"?'<div class="row"><div style="flex:0 1 140px"><label class="f">Title</label><select name="title">'+titleOpts(r.title)+'</select></div><div><label class="f">First name</label><input name="first_name" required value="'+h(r.first_name)+'"></div></div>':'<div><label class="f">First name</label><input name="first_name" required value="'+h(r.first_name)+'"></div>')
   +'<div><label class="f">Last name</label><input name="last_name" value="'+h(r.last_name)+'"></div>'
-  +(kind==="spouse"?'<div><label class="f">Phone <span class="opt">optional</span></label><input name="phone" inputmode="tel" oninput="opHint(this)" value="'+h(r.phone?"+"+r.phone:"")+'"><p class="hint op"></p></div><div><label class="f">Alternative phone <span class="opt">optional</span></label><input name="phone_alt" inputmode="tel" oninput="opHint(this)" value="'+h(r.phone_alt?"+"+r.phone_alt:"")+'"><p class="hint op"></p></div><div><label class="f">Email <span class="opt">optional</span></label><input name="email" type="email" value="'+h(r.email)+'"></div>'+(id?"":'<p class="hint">If your spouse already has an account with this phone or email, we will ask them to confirm and link your family.</p>'):"")
+  +(kind==="spouse"?'<div><label class="f">Phone <span class="opt">optional</span></label><input name="phone" inputmode="tel" oninput="opHint(this)" value="'+h(r.phone?"+"+r.phone:"")+'"><p class="hint op"></p></div><div class="reveal" data-alt-for="phone"><div><label class="f">Alternative phone <span class="opt">optional</span></label><input name="phone_alt" inputmode="tel" oninput="opHint(this)" value="'+h(r.phone_alt?"+"+r.phone_alt:"")+'"><p class="hint op"></p></div></div><div><label class="f">Email <span class="opt">optional</span></label><input name="email" type="email" value="'+h(r.email)+'"></div>'+(id?"":'<p class="hint">If your spouse already has an account with this phone or email, we will ask them to confirm and link your family.</p>'):"")
   +'<div class="relBday" data-req="'+(kind==="child"?1:"")+'" data-m="'+(r.birth_month||"")+'" data-d="'+(r.birth_day||"")+'" data-y="'+(r.birth_year||"")+'"></div>'
   +'<div class="row"><button class="btn primary">'+(id?"Save":"Add spouse")+'</button>'+(id?'<button type="button" class="btn danger" onclick="delRel('+id+')">Remove</button>':"")+"</div></form>"}
 async function linkAct(id,accept){try{await api("/api/me/links/"+id+(accept?"/accept":"/decline"),"POST");toast(accept?"Accounts linked":"Done");refresh()}catch(x){toast(x.message,true)}}
@@ -146,7 +157,20 @@ function opOf(v){let d=String(v||"").replace(/[^0-9+]/g,"");if(d[0]==="+")d=d.sl
  if(d.length<6)return"";if(d.slice(0,3)!=="256")return"Other";const n=d.slice(3);if(/^7[6-9]/.test(n)||/^3/.test(n))return"MTN";if(/^7[045]/.test(n)||/^73[01]/.test(n)||/^20/.test(n))return"Airtel";return"Other"}
 function opHint(i){const p=i.parentNode.querySelector(".op");if(p)p.textContent=opOf(i.value)?"Network: "+opOf(i.value):""}
 function show(v){document.querySelectorAll(".view").forEach(e=>e.classList.toggle("on",e.id==="v-"+v));document.querySelectorAll("#nav button").forEach(b=>b.setAttribute("aria-current",b.dataset.v===v?"page":"false"));history.replaceState(null,"","#"+v);scrollTo(0,0)}
-async function doSignup(e){e.preventDefault();const f=e.target;if(!f.reportValidity())return;try{await api("/api/auth/signup","POST",formObj(f));toast("Welcome!");boot()}catch(x){toast(x.message,true)}}
+let STEP=1;const STEPS=4;
+function setStep(n,back){STEP=n;document.querySelectorAll("#signup .step").forEach(el=>{const on=Number(el.dataset.step)===n;el.classList.toggle("on",on);el.classList.toggle("back",on&&!!back)});
+ document.querySelectorAll("#signup .progress i").forEach((el,i)=>el.classList.toggle("done",i<n));
+ $("wBack").style.visibility=n>1?"visible":"hidden";$("wNext").textContent=n===STEPS?"Create account":"Continue";
+ const first=document.querySelector('#signup .step.on input:not([type=hidden]),#signup .step.on select');if(first&&n>1&&matchMedia("(min-width:600px)").matches)first.focus({preventScroll:true})}
+function stepValid(){for(const el of document.querySelectorAll("#signup .step.on input,#signup .step.on select")){if(!el.checkValidity()){el.reportValidity();return false}}
+ if(STEP===2&&!phoneLooksValid($("sPhone").value)){toast("Please enter a complete phone number",true);return false}return true}
+function wiz(d){if(d>0&&!stepValid())return;if(d>0&&STEP===STEPS){$("signup").requestSubmit();return}setStep(Math.min(STEPS,Math.max(1,STEP+d)),d<0);scrollTo({top:0,behavior:"smooth"})}
+async function doSignup(e){e.preventDefault();if(!stepValid())return;const btn=$("wNext");btn.disabled=true;btn.textContent="Creating…";
+ try{await api("/api/auth/signup","POST",formObj(e.target));toast("Welcome to the family!");boot()}
+ catch(x){toast(x.message,true);const m=x.message.toLowerCase();setStep(/phone|email|number/.test(m)?2:/birth|day|month|year/.test(m)?3:/name|title/.test(m)?1:STEP,true)}
+ finally{btn.disabled=false;if(STEP===STEPS)btn.textContent="Create account"}}
+document.addEventListener("keydown",e=>{if(e.key==="Enter"&&e.target.closest&&e.target.closest("#signup")&&e.target.tagName==="INPUT"){e.preventDefault();wiz(1)}});
+setStep(1);
 async function doLogin(e){e.preventDefault();try{await api("/api/auth/login","POST",formObj(e.target));boot()}catch(x){toast(x.message,true)}}
 async function logout(){await api("/api/auth/logout","POST");location.hash="";boot()}
 async function patchMe(b,msg){try{await api("/api/me","PATCH",b);if(msg)toast(msg);await refresh()}catch(x){toast(x.message,true);refresh()}}

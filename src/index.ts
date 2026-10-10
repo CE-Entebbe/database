@@ -4,6 +4,7 @@ import { hashPassword, verifyPassword, signSession, readSession, fingerprint, SE
 import { adminPage } from "./admin-page";
 import { memberPage, messagePage } from "./member-page";
 import { accountPage } from "./account-page";
+import { ICONS } from "./icons";
 import { TITLES, MARITAL, normalizePhone, validDate, kampalaToday, nextOccurrence, displayName, parseBirth, birthIso, phoneOperator, type Birth } from "./people";
 
 export type Env = { DB: D1Database; ADMIN_TOKEN?: string; SESSION_SECRET?: string; PHOTOS?: R2Bucket };
@@ -537,6 +538,32 @@ me.delete("/photos/:id", async (c) => {
   return c.body(null, 204);
 });
 app.route("/api/me", me);
+// ---------- PWA ----------
+const manifest = (o: { name: string; short: string; start: string; scope: string; id: string }) => ({
+  id: o.id, name: o.name, short_name: o.short, start_url: o.start, scope: o.scope, display: "standalone", orientation: "portrait",
+  background_color: "#faf8f5", theme_color: "#8b3a62", description: "Celebrating every member of CE Entebbe",
+  icons: [
+    { src: "/icon-192.png", sizes: "192x192", type: "image/png" },
+    { src: "/icon-512.png", sizes: "512x512", type: "image/png" },
+    { src: "/icon-maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+    { src: "/icon.svg", sizes: "any", type: "image/svg+xml" },
+  ],
+});
+app.get("/manifest.webmanifest", (c) => c.body(JSON.stringify(manifest({ id: "/", name: "CE Entebbe Membership", short: "CE Entebbe", start: "/", scope: "/" })),
+  200, { "content-type": "application/manifest+json", "cache-control": "public, max-age=3600" }));
+for (const [name, b64] of Object.entries(ICONS)) {
+  const bytes = Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0));
+  app.get(`/${name}`, () => new Response(bytes, { headers: { "content-type": "image/png", "cache-control": "public, max-age=604800" } }));
+}
+app.get("/icon.svg", (c) => c.body(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7a2f54"/><stop offset=".55" stop-color="#b4476a"/><stop offset="1" stop-color="#e0795a"/></linearGradient></defs><rect width="64" height="64" rx="14" fill="url(#g)"/><text x="32" y="41" font-family="Inter,Arial,sans-serif" font-weight="700" font-size="24" fill="#fff" text-anchor="middle">CE</text></svg>`,
+  200, { "content-type": "image/svg+xml", "cache-control": "public, max-age=604800" }));
+// Minimal service worker: network-first; offline fallback page for navigations. Never caches API data.
+app.get("/sw.js", (c) => c.body(`const OFF="ce-offline-v1";
+self.addEventListener("install",e=>{e.waitUntil(caches.open(OFF).then(c=>c.put("/offline",new Response('<!doctype html><meta name=viewport content="width=device-width"><body style="font-family:system-ui;display:grid;place-items:center;min-height:100vh;margin:0;background:#faf8f5;color:#1c1917;text-align:center"><div><h1>You are offline</h1><p>Reconnect to continue.</p></div>',{headers:{"content-type":"text/html"}}))));self.skipWaiting()});
+self.addEventListener("activate",e=>e.waitUntil(self.clients.claim()));
+self.addEventListener("fetch",e=>{if(e.request.mode==="navigate")e.respondWith(fetch(e.request).catch(()=>caches.match("/offline")))});`,
+  200, { "content-type": "text/javascript", "cache-control": "no-cache", "service-worker-allowed": "/" }));
+
 // ---------- public ----------
 app.get("/", (c) => c.html(accountPage()));
 app.get("/health", (c) => c.json({ ok: true }));
@@ -587,8 +614,11 @@ app.post("/m/:code", async (c) => {
 
 // ---------- admin ----------
 app.use("/admin", requireAdmin);
+app.use("/admin/*", requireAdmin);
 app.use("/api/admin/*", requireAdmin);
 app.get("/admin", (c) => c.html(adminPage()));
+app.get("/admin/manifest.webmanifest", (c) => c.body(JSON.stringify(manifest({ id: "/admin", name: "CE Entebbe Admin", short: "CE Admin", start: "/admin", scope: "/admin" })),
+  200, { "content-type": "application/manifest+json" }));
 
 const A = "/api/admin";
 
