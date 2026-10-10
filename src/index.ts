@@ -36,6 +36,7 @@ const isSharedAsset = (p: string) => /^\/(icon[\w-]*\.(png|svg)|sw\.js|manifest\
 app.use("*", async (c, next) => {
   const u = new URL(c.req.url);
   const to = (host: string) => c.redirect(`https://${host}${u.pathname}${u.search}`, c.req.method === "GET" || c.req.method === "HEAD" ? 301 : 308);
+  if (u.hostname === "ceentebbe.online" || u.hostname === "www.ceentebbe.online") return to(isAdminPath(u.pathname) ? ADMIN_HOST : MEMBERS_HOST);
   if (u.hostname === ADMIN_HOST && !isAdminPath(u.pathname) && !isSharedAsset(u.pathname)) return to(MEMBERS_HOST);
   if (u.hostname === MEMBERS_HOST && isAdminPath(u.pathname)) return to(ADMIN_HOST);
   await next();
