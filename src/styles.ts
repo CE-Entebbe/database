@@ -120,6 +120,10 @@ fieldset.bday{border:0;padding:0;margin:0;min-width:0}fieldset.bday legend{paddi
 nav.bottom button{flex-direction:row;font-size:.88rem;padding:0 14px;min-height:40px}nav.bottom button svg{width:18px;height:18px}
 nav.bottom button[aria-current=page]{background:var(--accent-soft)}nav.bottom button[aria-current=page]:before{display:none}.wrap{padding-bottom:48px}.toast{bottom:28px}
 .hero{border-radius:28px;margin:8px 0 18px}}
+.gbtn{background:var(--card);border-color:var(--line2);color:var(--text);gap:10px}
+.or{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:.8rem;margin:14px 0}.or:before,.or:after{content:"";flex:1;height:1px;background:var(--line)}
+.banner{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:var(--radius);background:var(--accent-soft);color:var(--accent-text);margin-bottom:14px}
+.banner .hint{color:var(--accent-text);opacity:.85}
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 `;
 

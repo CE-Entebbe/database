@@ -85,3 +85,32 @@ Lists accept a `?church_id=` filter. Send `{active:false}` with PATCH to deactiv
 
 ## Layout
 `src/index.ts` holds the routes and rules, `src/admin-page.ts` the admin UI, `src/member-page.ts` the member UI, `src/styles.ts` the design system, `migrations/` the D1 schema and `test/` the tests.
+
+## Email (Resend) and Google sign-in
+
+Both are optional. Without their secrets the app hides "Continue with Google", the verify-email banner and email password reset (members are told to ask their church admin instead).
+
+| Secret | Purpose |
+| --- | --- |
+| `RESEND_API_KEY` | Sends email-confirmation links (valid 24 h) and password-reset links (valid 1 h, single use). |
+| `EMAIL_FROM` | Sender, e.g. `CE Entebbe <hello@ce-entebbe.org>`. Default `CE Entebbe <onboarding@resend.dev>` (Resend's test sender only delivers to the Resend account owner's own address, so verify a domain before going live). |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google OAuth 2.0 (authorization code + state + PKCE). |
+| `PUBLIC_URL` | Optional. Overrides the base URL used in email links and the OAuth redirect (defaults to the request origin). |
+
+Set them with `scripts/sync-secrets.sh` (reads them from the environment) or `npx wrangler secret put NAME`.
+
+### Resend domain verification
+1. resend.com → Domains → Add domain (e.g. `ce-entebbe.org`, or a subdomain like `mail.ce-entebbe.org`).
+2. Add the DNS records Resend shows (SPF `TXT`, DKIM `TXT`/`CNAME`, optional MX for bounces, and a DMARC `TXT` such as `v=DMARC1; p=none;`) at your DNS host; if the domain is on Cloudflare, Resend can add them automatically.
+3. Wait for "Verified", then set `EMAIL_FROM` to an address on that domain.
+4. API Keys → Create (permission "Sending access", restricted to that domain) → set it as `RESEND_API_KEY`.
+
+### Google sign-in
+1. console.cloud.google.com → create/select a project.
+2. APIs & Services → OAuth consent screen (Google Auth Platform → Branding/Audience): External, app name "CE Entebbe", support email, authorised domain `workers.dev` domain owner or your custom domain; scopes `openid`, `email`, `profile`; Publish the app (Testing mode only allows listed test users).
+3. Credentials → Create credentials → OAuth client ID → Web application.
+   - Authorised JavaScript origin: `https://ce-entebbe-membership.doxalight-inc.workers.dev`
+   - Authorised redirect URI: `https://ce-entebbe-membership.doxalight-inc.workers.dev/auth/google/callback`
+4. Copy the client ID/secret into `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`.
+
+Flows: a new Google user confirms their name, then completes the mandatory profile (title, birthday, phones, church, cell, married/kids) before the account is created; their email is marked verified. If the Google email already belongs to an account, they see "Is this you?" and Google is linked after they log in once with their password (or reset it by email).

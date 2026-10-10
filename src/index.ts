@@ -1,13 +1,14 @@
 import { Hono, type Context, type Next } from "hono";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
-import { hashPassword, verifyPassword, signSession, readSession, fingerprint, SESSION_COOKIE, SESSION_DAYS } from "./auth";
+import { hashPassword, verifyPassword, signSession, readSession, fingerprint, SESSION_COOKIE, SESSION_DAYS , signToken, readToken, randomUrlSafe, pkceChallenge } from "./auth";
 import { adminPage } from "./admin-page";
 import { memberPage, messagePage } from "./member-page";
 import { accountPage } from "./account-page";
 import { ICONS } from "./icons";
+import { IntegrationEnv, emailEnabled, googleEnabled, baseUrl, emailHtml, sendEmail, googleAuthUrl, googleExchange } from "./integrations";
 import { TITLES, MARITAL, normalizePhone, validDate, kampalaToday, nextOccurrence, displayName, parseBirth, birthIso, phoneOperator, type Birth } from "./people";
 
-export type Env = { DB: D1Database; ADMIN_TOKEN?: string; SESSION_SECRET?: string; PHOTOS?: R2Bucket };
+export type Env = IntegrationEnv & { DB: D1Database; ADMIN_TOKEN?: string; SESSION_SECRET?: string; PHOTOS?: R2Bucket };
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type C = Context<any>;
 
@@ -122,7 +123,7 @@ const PUBLIC_COLS = "id, church_id, household_id, name, title, first_name, last_
 const MEMBER_ROW = "SELECT m.*, h.anniversary FROM members m LEFT JOIN households h ON h.id=m.household_id";
 type MemberRow = { id: number; church_id: number; name: string; title: string | null; first_name: string | null;
   last_name: string | null; phone: string | null; phone_alt: string | null; household_id: number; email: string | null; birth_month: number | null; birth_day: number | null; birth_year: number | null; marital_status: string | null;
-  anniversary: string | null; has_kids: number; password_hash: string | null; cell_id: number | null; active: number; access_code: string };
+  anniversary: string | null; has_kids: number; password_hash: string | null; google_sub: string | null; email_verified_at: string | null; cell_id: number | null; active: number; access_code: string };
 
 /** Validate member detail fields. `cur` = existing row for partial updates; `strict` = public registration rules. */
 function memberFields(b: Record<string, unknown>, cur: MemberRow | null, strict: boolean) {
@@ -348,8 +349,10 @@ function sessionSecret(c: C) {
   if (!s) throw new HttpError(503, "SESSION_SECRET is not configured");
   return s;
 }
-async function startSession(c: C, m: { id: number; password_hash: string }) {
-  setCookie(c, SESSION_COOKIE, await signSession(sessionSecret(c), m.id, m.password_hash), {
+/** What a session is bound to: the password hash, or the Google subject for Google-only accounts. */
+const authKey = (m: { password_hash?: string | null; google_sub?: string | null }) => m.password_hash ?? (m.google_sub ? "g:" + m.google_sub : null);
+async function startSession(c: C, m: { id: number; password_hash?: string | null; google_sub?: string | null }) {
+  setCookie(c, SESSION_COOKIE, await signSession(sessionSecret(c), m.id, authKey(m)!), {
     httpOnly: true, secure: new URL(c.req.url).protocol === "https:", sameSite: "Lax", path: "/", maxAge: SESSION_DAYS * 86400 });
 }
 type MC = Context<{ Bindings: Env; Variables: { member: MemberRow } }>;
@@ -357,7 +360,7 @@ async function requireMember(c: MC, next: Next) {
   const secret = sessionSecret(c as unknown as C);
   const s = await readSession(secret, getCookie(c, SESSION_COOKIE));
   const m = s && (await first<MemberRow>(c.env.DB, `${MEMBER_ROW} WHERE m.id=? AND m.active=1`, s.memberId));
-  if (!s || !m || !m.password_hash || (await fingerprint(secret, m.password_hash)) !== s.fp) return c.json({ error: "Please log in" }, 401);
+  if (!s || !m || !authKey(m) || (await fingerprint(secret, authKey(m)!)) !== s.fp) return c.json({ error: "Please log in" }, 401);
   c.set("member", m);
   await next();
 }
@@ -377,53 +380,201 @@ app.get("/api/public/cells", async (c) => {
   return c.json(await memberCells(c.env.DB, churchId));
 });
 
-app.post("/api/auth/signup", async (c) => {
-  const b = await body(c);
-  sessionSecret(c);
-  const password = passwordField(b.password);
+// Who already owns one of these contacts? Never reveals names — only which kind of contact clashed.
+async function existingAccount(db: D1Database, f: { phone?: string | null; phone_alt?: string | null; email?: string | null }) {
+  for (const v of [f.email, f.phone, f.phone_alt]) {
+    if (!v) continue;
+    const m = await first<{ id: number; email: string | null }>(db, "SELECT m.id, m.email FROM identifiers i JOIN members m ON m.id=i.member_id WHERE i.value=?", v);
+    if (m) return { field: v.includes("@") ? "email" : "phone", member: m };
+  }
+  return null;
+}
+function existsError(c: C, ex: { field: string; member: { email: string | null } }) {
+  return c.json({
+    error: ex.field === "email" ? "An account with this email already exists" : "An account with this phone number already exists",
+    code: "account_exists", field: ex.field, can_reset: emailEnabled(c.env) && !!ex.member.email,
+  }, 409);
+}
+type NewAccount = { password_hash: string | null; google_sub?: string | null; email_verified?: boolean };
+/** Shared by password sign-up and Google onboarding. Returns a Response on a duplicate, else the new member. */
+async function createAccount(c: C, b: Record<string, unknown>, acct: NewAccount) {
   b.title ??= "";
   const f = memberFields(b, null, true);
   const churchId = intOrNull(b.church_id, "church_id");
   if (!churchId || !(await first(c.env.DB, "SELECT id FROM churches WHERE id=? AND active=1", churchId))) throw bad("Please choose your church");
   let cellId = intOrNull(b.cell_id, "cell_id");
   if (cellId) { if (!(await cellsEnabled(c.env.DB))) cellId = null; else await assertCellInChurch(c.env.DB, cellId, churchId); }
+  const ex = await existingAccount(c.env.DB, f);
+  if (ex) return { response: existsError(c, ex) };
   // A number/email may already sit on someone's spouse record: that spouse is now signing up.
   const owner = await contactOwner(c.env.DB, [f.phone, f.phone_alt, f.email], {});
   let spouseRec: RelativeRow | null = null;
-  if (owner?.member_id) throw new HttpError(409, owner.value.includes("@") ? "This email is already registered" : "This phone number is already registered");
   if (owner?.relative_id) {
     spouseRec = await first<RelativeRow>(c.env.DB, "SELECT * FROM relatives WHERE id=?", owner.relative_id);
     if (spouseRec?.relation !== "spouse") throw new HttpError(409, "That phone number or email already belongs to someone else");
-    // all of this person's contacts must be free apart from that spouse record
     await assertContactsFree(c.env.DB, [f.phone, f.phone_alt, f.email], { relative: spouseRec.id });
     await run(c.env.DB, "UPDATE relatives SET phone=NULL, phone_alt=NULL, email=NULL, phone_operator=NULL, phone_alt_operator=NULL WHERE id=?", spouseRec.id);
   }
-  const password_hash = await hashPassword(password);
   const hh = await newHousehold(c.env.DB, f.marital_status === "married" ? f.anniversary : null);
-  const m = await first<{ id: number; password_hash: string }>(c.env.DB,
-    `INSERT INTO members(church_id,household_id,name,title,first_name,last_name,phone,phone_operator,phone_alt,phone_alt_operator,email,birth_month,birth_day,birth_year,marital_status,has_kids,cell_id,access_code,password_hash)
-     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id, password_hash`,
+  const m = await first<{ id: number; password_hash: string | null; google_sub: string | null; email: string | null }>(c.env.DB,
+    `INSERT INTO members(church_id,household_id,name,title,first_name,last_name,phone,phone_operator,phone_alt,phone_alt_operator,email,birth_month,birth_day,birth_year,marital_status,has_kids,cell_id,access_code,password_hash,google_sub,email_verified_at)
+     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id, password_hash, google_sub, email`,
     churchId, hh, f.name, f.title, f.first_name, f.last_name, f.phone, f.phone_operator, f.phone_alt, f.phone_alt_operator, f.email,
-    f.birth_month, f.birth_day, f.birth_year, f.marital_status ?? "single", f.has_kids, cellId, newAccessCode(), password_hash);
-  // The member who listed this person as spouse confirms the link (protects against someone claiming a number).
+    f.birth_month, f.birth_day, f.birth_year, f.marital_status ?? "single", f.has_kids, cellId, newAccessCode(), acct.password_hash,
+    acct.google_sub ?? null, acct.email_verified && f.email ? new Date().toISOString() : null);
   if (spouseRec) await requestLink(c.env.DB, m!.id, spouseRec.member_id);
-  await startSession(c, m!);
-  return c.json({ ok: true, spouse_link_pending: !!spouseRec }, 201);
+  return { member: m!, spouseLinkPending: !!spouseRec };
+}
+
+// ----- email verification & password reset (Resend) -----
+const VERIFY_TTL = 24 * 3600, RESET_TTL = 3600, RESEND_COOLDOWN_SEC = 60;
+async function sendVerification(c: C, m: { id: number; email: string | null }) {
+  if (!m.email || !emailEnabled(c.env)) return false;
+  const t = await signToken(sessionSecret(c), "verify", { m: m.id, e: m.email }, VERIFY_TTL);
+  const link = `${baseUrl(c.env, c.req.url)}/auth/verify?t=${encodeURIComponent(t)}`;
+  await run(c.env.DB, "UPDATE members SET verify_sent_at=datetime('now') WHERE id=?", m.id);
+  return sendEmail(c.env, m.email, "Confirm your email for CE Entebbe",
+    emailHtml("Confirm your email", "Tap the button below to confirm this email address for your CE Entebbe account. The link expires in 24 hours.", "Confirm email", link),
+    `Confirm your email for CE Entebbe (link valid 24 hours): ${link}`);
+}
+/** true when the last send was less than the cooldown ago */
+const tooSoon = (ts: string | null) => !!ts && Date.now() - Date.parse(ts.replace(" ", "T") + "Z") < RESEND_COOLDOWN_SEC * 1000;
+
+app.get("/api/auth/config", (c) => c.json({ email: emailEnabled(c.env), google: googleEnabled(c.env) }));
+app.post("/api/auth/check", async (c) => {
+  const b = await body(c);
+  const phone = typeof b.phone === "string" && b.phone.trim() ? normalizePhone(b.phone) : null;
+  const phone_alt = typeof b.phone_alt === "string" && b.phone_alt.trim() ? normalizePhone(b.phone_alt) : null;
+  const email = typeof b.email === "string" && b.email.trim() ? b.email.trim().toLowerCase() : null;
+  const ex = await existingAccount(c.env.DB, { phone, phone_alt, email });
+  return ex ? existsError(c, ex) : c.json({ ok: true });
+});
+app.post("/api/auth/signup", async (c) => {
+  const b = await body(c);
+  sessionSecret(c);
+  const password = passwordField(b.password);
+  const r = await createAccount(c, b, { password_hash: await hashPassword(password) });
+  if ("response" in r) return r.response;
+  const pending = await readToken<{ sub: string; email: string }>(sessionSecret(c), "gpending", getCookie(c, "ce_g"));
+  await startSession(c, r.member);
+  const sent = await sendVerification(c, r.member);
+  return c.json({ ok: true, spouse_link_pending: r.spouseLinkPending, verification_sent: sent, google_pending: !!pending }, 201);
 });
 app.post("/api/auth/login", async (c) => {
   const b = await body(c);
-  sessionSecret(c);
+  const secret = sessionSecret(c);
   const login = str(b.login, "Phone or email")!;
   const password = typeof b.password === "string" ? b.password : "";
   const key = login.includes("@") ? login.toLowerCase() : normalizePhone(login) ?? "-";
-  const m = await first<{ id: number; password_hash: string | null }>(c.env.DB,
-    "SELECT m.id, m.password_hash FROM identifiers i JOIN members m ON m.id=i.member_id WHERE i.value=? AND m.active=1", key);
+  const m = await first<{ id: number; password_hash: string | null; google_sub: string | null; email: string | null }>(c.env.DB,
+    "SELECT m.id, m.password_hash, m.google_sub, m.email FROM identifiers i JOIN members m ON m.id=i.member_id WHERE i.value=? AND m.active=1", key);
   const ok = await verifyPassword(password, m?.password_hash ?? "pbkdf2$100000$AAAAAAAAAAAAAAAAAAAAAA==$AAAA");
+  if (m && !m.password_hash && m.google_sub) throw new HttpError(401, "This account uses Google sign-in. Tap “Continue with Google”.");
   if (!m || !m.password_hash || !ok) throw new HttpError(401, "Wrong phone/email or password");
-  await startSession(c, m as { id: number; password_hash: string });
-  return c.json({ ok: true });
+  // Finishing the "Is this you?" step after Google: link Google to the account the person just proved they own.
+  let googleLinked = false;
+  const g = await readToken<{ sub: string; email: string }>(secret, "gpending", getCookie(c, "ce_g"));
+  if (g && m.email && g.email === m.email.toLowerCase() && !m.google_sub
+      && !(await first(c.env.DB, "SELECT id FROM members WHERE google_sub=?", g.sub))) {
+    await run(c.env.DB, "UPDATE members SET google_sub=?, email_verified_at=COALESCE(email_verified_at, datetime('now')) WHERE id=?", g.sub, m.id);
+    deleteCookie(c, "ce_g", { path: "/" });
+    googleLinked = true;
+  }
+  await startSession(c, m);
+  return c.json({ ok: true, google_linked: googleLinked });
 });
 app.post("/api/auth/logout", (c) => { deleteCookie(c, SESSION_COOKIE, { path: "/" }); return c.json({ ok: true }); });
+app.get("/auth/verify", async (c) => {
+  const t = await readToken<{ m: number; e: string }>(sessionSecret(c), "verify", c.req.query("t"));
+  const m = t && (await first<{ id: number; email: string | null }>(c.env.DB, "SELECT id, email FROM members WHERE id=?", t.m));
+  if (!t || !m || (m.email ?? "").toLowerCase() !== t.e.toLowerCase()) return c.redirect("/?verified=invalid");
+  await run(c.env.DB, "UPDATE members SET email_verified_at=COALESCE(email_verified_at, datetime('now')) WHERE id=?", m.id);
+  return c.redirect("/?verified=1");
+});
+// Always answers the same way so it can't be used to discover accounts.
+app.post("/api/auth/forgot", async (c) => {
+  const b = await body(c);
+  if (!emailEnabled(c.env)) return c.json({ ok: false, email_enabled: false });
+  const login = String(b.login ?? "").trim();
+  const key = login.includes("@") ? login.toLowerCase() : normalizePhone(login) ?? "-";
+  const m = await first<{ id: number; email: string | null; password_hash: string | null; google_sub: string | null; reset_sent_at: string | null }>(c.env.DB,
+    "SELECT m.id, m.email, m.password_hash, m.google_sub, m.reset_sent_at FROM identifiers i JOIN members m ON m.id=i.member_id WHERE i.value=? AND m.active=1", key);
+  if (m?.email && !tooSoon(m.reset_sent_at)) {
+    const fp = await fingerprint(sessionSecret(c), authKey(m) ?? "none");
+    const t = await signToken(sessionSecret(c), "reset", { m: m.id, fp }, RESET_TTL);
+    const link = `${baseUrl(c.env, c.req.url)}/?reset=${encodeURIComponent(t)}`;
+    await run(c.env.DB, "UPDATE members SET reset_sent_at=datetime('now') WHERE id=?", m.id);
+    await sendEmail(c.env, m.email, "Reset your CE Entebbe password",
+      emailHtml("Reset your password", "Someone (hopefully you) asked to reset the password for your CE Entebbe account. The link works once and expires in 1 hour.", "Choose a new password", link),
+      `Reset your CE Entebbe password (valid 1 hour): ${link}`);
+  }
+  return c.json({ ok: true, email_enabled: true });
+});
+app.post("/api/auth/reset", async (c) => {
+  const b = await body(c);
+  const secret = sessionSecret(c);
+  const t = await readToken<{ m: number; fp: string }>(secret, "reset", String(b.token ?? ""));
+  const m = t && (await first<{ id: number; password_hash: string | null; google_sub: string | null }>(c.env.DB, "SELECT id, password_hash, google_sub FROM members WHERE id=? AND active=1", t.m));
+  // Single use: the fingerprint changes as soon as the password does.
+  if (!t || !m || (await fingerprint(secret, authKey(m) ?? "none")) !== t.fp) throw bad("This reset link is invalid or has expired. Please request a new one.");
+  const password_hash = await hashPassword(passwordField(b.password));
+  // Receiving the link proves control of the email.
+  await run(c.env.DB, "UPDATE members SET password_hash=?, email_verified_at=COALESCE(email_verified_at, datetime('now')) WHERE id=?", password_hash, m.id);
+  await startSession(c, { id: m.id, password_hash });
+  return c.json({ ok: true });
+});
+
+// ----- Google sign-in (authorization code + state + PKCE) -----
+const cookieOpts = (c: C, maxAge: number) => ({ httpOnly: true, secure: new URL(c.req.url).protocol === "https:", sameSite: "Lax" as const, path: "/", maxAge });
+const googleRedirect = (c: C) => `${baseUrl(c.env, c.req.url)}/auth/google/callback`;
+type GPending = { sub: string; email: string; given: string; family: string; mode: "new" | "link" };
+app.get("/auth/google/start", async (c) => {
+  if (!googleEnabled(c.env)) return c.redirect("/?google=unavailable");
+  const state = randomUrlSafe(24), verifier = randomUrlSafe(48);
+  setCookie(c, "ce_gs", await signToken(sessionSecret(c), "gstate", { s: state, v: verifier }, 600), cookieOpts(c, 600));
+  return c.redirect(googleAuthUrl(c.env, googleRedirect(c), state, await pkceChallenge(verifier)));
+});
+app.get("/auth/google/callback", async (c) => {
+  if (!googleEnabled(c.env)) return c.redirect("/?google=unavailable");
+  const secret = sessionSecret(c);
+  const st = await readToken<{ s: string; v: string }>(secret, "gstate", getCookie(c, "ce_gs"));
+  deleteCookie(c, "ce_gs", { path: "/" });
+  const code = c.req.query("code");
+  if (!st || !code || c.req.query("state") !== st.s) return c.redirect("/?google=error");
+  let g;
+  try { g = await googleExchange(c.env, code, st.v, googleRedirect(c)); } catch { return c.redirect("/?google=error"); }
+  if (!g.email_verified) return c.redirect("/?google=unverified");
+  const bySub = await first<{ id: number; password_hash: string | null; google_sub: string | null; active: number }>(c.env.DB,
+    "SELECT id, password_hash, google_sub, active FROM members WHERE google_sub=?", g.sub);
+  if (bySub) {
+    if (!bySub.active) return c.redirect("/?google=inactive");
+    await startSession(c, bySub);
+    return c.redirect("/");
+  }
+  const byEmail = await first<{ id: number }>(c.env.DB, "SELECT m.id FROM identifiers i JOIN members m ON m.id=i.member_id WHERE i.value=?", g.email);
+  const pending: GPending = { sub: g.sub, email: g.email, given: g.given_name ?? g.name ?? "", family: g.family_name ?? "", mode: byEmail ? "link" : "new" };
+  setCookie(c, "ce_g", await signToken(secret, "gpending", pending, 1800), cookieOpts(c, 1800));
+  return c.redirect(`/?google=${pending.mode}`);
+});
+app.get("/api/auth/google/pending", async (c) => {
+  const p = await readToken<GPending>(sessionSecret(c), "gpending", getCookie(c, "ce_g"));
+  if (!p) return c.json({ pending: null });
+  return c.json({ pending: { email: p.email, given_name: p.given, family_name: p.family, mode: p.mode },
+    can_reset: emailEnabled(c.env) });
+});
+app.post("/api/auth/google/cancel", (c) => { deleteCookie(c, "ce_g", { path: "/" }); return c.json({ ok: true }); });
+// Finishes onboarding for a brand-new Google user: confirmed name + the mandatory profile, then the account exists.
+app.post("/api/auth/google/complete", async (c) => {
+  const p = await readToken<GPending>(sessionSecret(c), "gpending", getCookie(c, "ce_g"));
+  if (!p) throw new HttpError(401, "Your Google sign-in expired. Please tap “Continue with Google” again.");
+  const b = await body(c);
+  b.email = p.email;
+  const r = await createAccount(c, b, { password_hash: null, google_sub: p.sub, email_verified: true });
+  if ("response" in r) return r.response;
+  deleteCookie(c, "ce_g", { path: "/" });
+  await startSession(c, r.member);
+  return c.json({ ok: true, spouse_link_pending: r.spouseLinkPending }, 201);
+});
 
 const me = new Hono<{ Bindings: Env; Variables: { member: MemberRow } }>();
 me.use("*", requireMember);
@@ -440,7 +591,9 @@ me.get("/", async (c) => {
       birth_month: m.birth_month, birth_day: m.birth_day, birth_year: m.birth_year,
       marital_status: m.marital_status ?? "single", anniversary: m.anniversary, has_kids: !!m.has_kids, church_id: m.church_id,
       church_name: church?.name, cell_id: enabled ? m.cell_id : null, cell_name: cell?.name ?? null,
-      display_name: displayName(m.title, m.first_name, m.name) },
+      display_name: displayName(m.title, m.first_name, m.name),
+      email_verified: !!m.email_verified_at, local_login: !!m.password_hash, google_linked: !!m.google_sub },
+    features: { email: emailEnabled(c.env), google: googleEnabled(c.env) },
     linked_spouse: sp ? { member_id: sp.id, display_name: displayName(sp.title, sp.first_name, sp.name), name: sp.name,
       birth_month: sp.birth_month, birth_day: sp.birth_day, birth_year: sp.birth_year } : null,
     link_requests: {
@@ -459,7 +612,7 @@ me.get("/", async (c) => {
 });
 me.patch("/", async (c) => {
   const m = c.get("member"); const b = await body(c);
-  for (const k of ["church_id", "access_code", "password_hash", "active", "household_id"]) delete b[k]; // members can't move church themselves
+  for (const k of ["church_id", "access_code", "password_hash", "active", "household_id", "google_sub", "email_verified_at"]) delete b[k]; // members can't move church themselves
   const f = memberFields(b, m, false);
   if (!f.birth_month) throw bad("Birthday (month and day) is required");
   if (f.marital_status !== "married" && (await linkedSpouse(c.env.DB, m))) throw bad("Your account is linked to your spouse's. Please ask the church admin to change this.");
@@ -478,11 +631,26 @@ me.patch("/", async (c) => {
     c.env.DB.prepare("UPDATE households SET anniversary=? WHERE id=?").bind(f.anniversary, m.household_id),
   ]);
   await applyMaritalSideEffects(c.env, m, f.marital_status ?? "single");
+  let verificationSent = false;
+  if ((f.email ?? null) !== (m.email ?? null)) {
+    await run(c.env.DB, "UPDATE members SET email_verified_at=NULL, verify_sent_at=NULL WHERE id=?", m.id);
+    if (f.email) verificationSent = await sendVerification(c as unknown as C, { id: m.id, email: f.email });
+  }
+  return c.json({ ok: true, verification_sent: verificationSent });
+});
+me.post("/verify/resend", async (c) => {
+  const m = c.get("member");
+  if (!emailEnabled(c.env)) throw new HttpError(503, "Email isn't set up yet");
+  if (!m.email) throw bad("Add an email address first");
+  if (m.email_verified_at) return c.json({ ok: true, already: true });
+  if (tooSoon((m as MemberRow & { verify_sent_at: string | null }).verify_sent_at)) throw new HttpError(429, "Please wait a minute before asking for another email");
+  if (!(await sendVerification(c as unknown as C, m))) throw new HttpError(502, "Couldn't send the email right now. Please try again later.");
   return c.json({ ok: true });
 });
 me.post("/password", async (c) => {
   const m = c.get("member"); const b = await body(c);
-  if (!(await verifyPassword(String(b.current ?? ""), m.password_hash))) throw bad("Current password is wrong");
+  // Google-only accounts may set a first password without a current one.
+  if (m.password_hash && !(await verifyPassword(String(b.current ?? ""), m.password_hash))) throw bad("Current password is wrong");
   const password_hash = await hashPassword(passwordField(b.password));
   await run(c.env.DB, "UPDATE members SET password_hash=? WHERE id=?", password_hash, m.id);
   await startSession(c as unknown as C, { id: m.id, password_hash });

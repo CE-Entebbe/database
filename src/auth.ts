@@ -49,3 +49,23 @@ export async function readSession(secret: string, token: string | undefined, now
   return { memberId: Number(id), fp };
 }
 export const fingerprint = async (secret: string, pwHash: string) => (await hmac(secret, "fp:" + pwHash)).slice(0, 10);
+
+/** Generic signed, expiring token: base64url(JSON).sig — used for email links, OAuth state and pending Google sign-ups. */
+export async function signToken(secret: string, purpose: string, payload: Record<string, unknown>, ttlSec: number, now = Date.now()) {
+  const body = b64url(enc.encode(JSON.stringify({ ...payload, p: purpose, exp: Math.floor(now / 1000) + ttlSec })));
+  return `${body}.${await hmac(secret, "tok:" + body)}`;
+}
+export async function readToken<T = Record<string, unknown>>(secret: string, purpose: string, token: string | undefined | null, now = Date.now()): Promise<T | null> {
+  if (!token || typeof token !== "string") return null;
+  const [body, sig] = token.split(".");
+  if (!body || !sig || !eq(enc.encode(sig), enc.encode(await hmac(secret, "tok:" + body)))) return null;
+  try {
+    const o = JSON.parse(new TextDecoder().decode(unb64(body.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((body.length + 3) % 4))));
+    if (o.p !== purpose || typeof o.exp !== "number" || o.exp * 1000 < now) return null;
+    return o as T;
+  } catch { return null; }
+}
+export const randomUrlSafe = (n = 32) => b64url(crypto.getRandomValues(new Uint8Array(n)));
+export async function pkceChallenge(verifier: string) {
+  return b64url(new Uint8Array(await crypto.subtle.digest("SHA-256", enc.encode(verifier))));
+}

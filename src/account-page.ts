@@ -12,6 +12,7 @@ export const accountPage = () => `${head("CE Membership")}<body>
  <div class="hero">${MARK.replace('class="mark"', 'class="mark" style="font-size:18px"')}
   <h1>Celebrating every member</h1><p>Join the CE Entebbe family so we can celebrate your birthday and anniversary with you.</p></div>
  <div class="auth-card card">
+ <div id="gWrap" hidden><a class="btn block gbtn" href="/auth/google/start"><svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg> Continue with Google</a><div class="or"><span>or</span></div></div>
  <div class="seg" role="tablist"><button role="tab" id="tSignup" aria-selected="true" onclick="authTab('signup')">Create account</button><button role="tab" id="tLogin" aria-selected="false" onclick="authTab('login')">Log in</button></div>
  <form id="signup" onsubmit="doSignup(event)" novalidate>
   <div class="progress" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
@@ -37,13 +38,66 @@ export const accountPage = () => `${head("CE Membership")}<body>
   <div class="fl"><input id="lLogin" name="login" required autocomplete="username" placeholder=" "><label for="lLogin">Phone or email</label></div>
   <div class="fl"><input id="lPass" name="password" type="password" required autocomplete="current-password" placeholder=" "><label for="lPass">Password</label></div>
   <button class="btn primary block">Log in</button>
-  <p class="hint" style="text-align:center">Forgot your password? Ask your church admin.</p>
+  <button type="button" class="btn ghost" onclick="openForgot()">Forgot your password?</button>
  </form>
+ <div id="forgot" class="stack" hidden>
+  <div class="steplabel">Reset password</div><h2 style="margin:0">Forgot your password?</h2>
+  <div id="fgOn" class="stack"><p class="hint">Enter your phone number or email. If your account has an email address, we'll send you a link to choose a new password.</p>
+   <div class="fl"><input id="fgLogin" placeholder=" " autocomplete="username"><label for="fgLogin">Phone or email</label></div>
+   <button class="btn primary block" id="fgBtn" onclick="sendForgot()">Send reset link</button></div>
+  <p class="hint" id="fgOff" hidden>Password reset by email isn't available yet. Please ask your church admin to help you get back into your account.</p>
+  <div id="fgDone" class="empty" style="border:0" hidden><div><b>Check your inbox</b><br>If an account with that phone or email has an email address, a reset link is on its way. It expires in 1 hour.</div></div>
+  <button type="button" class="btn ghost" onclick="panel('login')">Back to log in</button>
+ </div>
+ <div id="exists" class="stack" hidden>
+  <div class="steplabel">Is this you?</div><h2 style="margin:0" id="exTitle"></h2>
+  <p class="hint" id="exText"></p>
+  <button class="btn primary block" onclick="exLogin()">Yes, log me in</button>
+  <button class="btn block" id="exForgot" onclick="exForgot()">Yes, but I forgot my password</button>
+  <p class="hint" id="exNoReset" hidden>Forgot your password? Please ask your church admin to help you get back in.</p>
+  <button class="btn block" onclick="$('exNo').hidden=false">No, this isn't me</button>
+  <div id="exNo" class="card stack" hidden style="box-shadow:none;background:var(--bg2)">
+   <p class="hint" style="color:var(--text)">Each phone number and email can only belong to one person in our church records, so we can't use it for a second account.</p>
+   <p class="hint">If you think someone registered with your details by mistake, please speak to your church admin. Otherwise you can use a different number or email.</p>
+   <button class="btn block" id="exDiff" onclick="exDifferent()">Use a different number</button></div>
+  <button type="button" class="btn ghost" onclick="exCancel()">Back</button>
+ </div>
+ <form id="reset" class="stack" hidden onsubmit="doReset(event)">
+  <div class="steplabel">Reset password</div><h2 style="margin:0">Choose a new password</h2>
+  <div class="fl"><input id="rsPass" name="password" type="password" minlength="8" required autocomplete="new-password" placeholder=" "><label for="rsPass">New password (8+ characters)</label></div>
+  <button class="btn primary block">Save and log in</button>
+ </form>
+ <div id="gflow" hidden>
+  <div class="progress" aria-hidden="true"><i class="done"></i><i id="gp2"></i></div>
+  <form id="gName" class="stack" onsubmit="gNameNext(event)">
+   <div class="steplabel">Welcome · Step 1 of 2</div><h2 style="margin:0">Is this your name?</h2>
+   <p class="hint">We got this from Google (<b id="gEmail"></b>). Change it if it's not how the church knows you.</p>
+   <div class="fl"><input id="gFirst" name="first_name" required placeholder=" " autocomplete="given-name"><label for="gFirst">First name</label></div>
+   <div class="fl"><input id="gLast" name="last_name" required placeholder=" " autocomplete="family-name"><label for="gLast">Last name</label></div>
+   <button class="btn primary block">Yes, continue</button>
+   <button type="button" class="btn ghost" onclick="gCancel()">Cancel</button>
+  </form>
+  <form id="gOnboard" class="stack" hidden onsubmit="gComplete(event)" novalidate>
+   <div class="steplabel">Welcome · Step 2 of 2</div><h2 style="margin:0">A few details to finish</h2>
+   <div class="fl"><select id="goTitle" name="title">${TITLE_OPTS}</select><label for="goTitle">Title</label></div>
+   <div id="goBday"></div>
+   <div class="fl"><input id="goPhone" name="phone" required inputmode="tel" autocomplete="tel" placeholder=" " oninput="opHint(this)"><label for="goPhone">Phone number</label><p class="hint op"></p></div>
+   <div class="reveal" data-alt-for="phone"><div><div class="fl"><input id="goPhone2" name="phone_alt" inputmode="tel" placeholder=" " oninput="opHint(this)"><label for="goPhone2">Alternative phone (optional)</label><p class="hint op"></p></div></div></div>
+   <div class="fl"><select id="goChurch" name="church_id" required onchange="loadCells(this.value,'goCell','goCellWrap')"></select><label for="goChurch">Church</label></div>
+   <div id="goCellWrap" class="fl" hidden><select id="goCell" name="cell_id"></select><label for="goCell">Cell (optional)</label></div>
+   <label class="switch"><span><b>Married</b></span><input type="checkbox" id="goMarried" role="switch" onchange="$('goAnnWrap').classList.toggle('open',this.checked)"><span class="k"></span></label>
+   <div class="reveal" id="goAnnWrap"><div><label class="f" for="goAnn">Wedding anniversary <span class="opt">optional</span></label><input id="goAnn" name="anniversary" type="date"></div></div>
+   <label class="switch"><span><b>Do you have kids?</b><br><span class="hint">You can add them after this step</span></span><input type="checkbox" id="goKids" role="switch"><span class="k"></span></label>
+   <button class="btn primary block" id="goBtn">Finish and enter</button>
+   <button type="button" class="btn ghost" onclick="gBack()">Back</button>
+  </form>
+ </div>
  </div>
 </section>
 
 <section id="app" hidden>
  <div class="view" id="v-profile">
+  <div id="verifyBanner" class="banner" hidden><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 7l9 6 9-6"/></svg><div style="flex:1"><b>Verify your email</b><br><span class="hint" id="vbText"></span></div><button class="btn" id="vbBtn" onclick="resendVerify()">Resend</button></div>
   <p class="pill" id="churchPill"></p><h1 id="hello"></h1><p class="sub">Keep your details up to date so we never miss your day.</p>
   <form class="card stack" onsubmit="saveProfile(event)">
    <div class="row"><div style="flex:0 1 140px"><label class="f" for="pTitle">Title</label><select id="pTitle" name="title">${TITLE_OPTS}</select></div>
@@ -57,7 +111,7 @@ export const accountPage = () => `${head("CE Membership")}<body>
    <button class="btn primary block">Save profile</button>
   </form>
   <h2>Password</h2>
-  <form class="card stack" onsubmit="changePw(event)"><input type="password" name="current" placeholder="Current password" required autocomplete="current-password" aria-label="Current password">
+  <form class="card stack" onsubmit="changePw(event)"><p class="hint" id="pwGoogle" hidden>You sign in with Google. You can also set a password to log in with your phone or email.</p><input type="password" name="current" id="pwCur" placeholder="Current password" required autocomplete="current-password" aria-label="Current password">
    <input type="password" name="password" placeholder="New password (8+ characters)" minlength="8" required autocomplete="new-password" aria-label="New password"><button class="btn block">Change password</button></form>
  </div>
 
@@ -102,7 +156,7 @@ const $=id=>document.getElementById(id);
 const h=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c]);
 let tt;function toast(m,err){const t=$("toast");t.textContent=m;t.className="toast show"+(err?" err":"");clearTimeout(tt);tt=setTimeout(()=>t.className="toast",2800)}
 async function api(path,method="GET",body,raw){const r=await fetch(path,{method,headers:body&&!raw?{"content-type":"application/json"}:{},body:raw?body:body?JSON.stringify(body):undefined,credentials:"same-origin"});
- if(r.status===204)return null;const j=await r.json().catch(()=>({}));if(!r.ok){const e=new Error(j.error||"Something went wrong");e.status=r.status;throw e}return j}
+ if(r.status===204)return null;const j=await r.json().catch(()=>({}));if(!r.ok){const e=new Error(j.error||"Something went wrong");e.status=r.status;e.data=j;throw e}return j}
 const formObj=f=>Object.fromEntries(new FormData(f).entries());
 const TITLES={"":"None",Brother:1,Sister:1,Pastor:1,Deacon:1,Deaconess:1};
 const titleOpts=sel=>Object.keys(TITLES).map(t=>'<option value="'+t+'"'+(t===(sel||"")?" selected":"")+">"+(t||"None")+"</option>").join("");
@@ -111,21 +165,66 @@ const today=new Date(Date.now()-new Date().getTimezoneOffset()*6e4).toISOString(
 document.querySelectorAll('input[type=date]').forEach(i=>i.max=today);
 let ME=null;
 
-function authTab(t){$("signup").hidden=t!=="signup";$("login").hidden=t!=="login";$("tSignup").setAttribute("aria-selected",t==="signup");$("tLogin").setAttribute("aria-selected",t==="login")}
+let CFG={email:false,google:false};
+const PANELS=["signup","login","forgot","exists","reset","gflow"];
+function panel(t){PANELS.forEach(p=>$(p).hidden=p!==t);const tabs=t==="signup"||t==="login";document.querySelector("#auth .seg").hidden=!tabs;$("gWrap").hidden=!(tabs&&CFG.google);
+ $("tSignup").setAttribute("aria-selected",t==="signup");$("tLogin").setAttribute("aria-selected",t==="login")}
+function authTab(t){panel(t)}
+let EX=null;
+function showExists(d,value,from){EX={...d,value,from};const em=d.field==="email";
+ $("exTitle").textContent=em?"An account with this email already exists":"An account with this number already exists";
+ $("exText").textContent=(d.from_google?"Your Google email is already registered. ":"")+"Is this your account?"+(d.from_google?" Log in once with your password and we'll connect Google to it.":"");
+ $("exForgot").hidden=!d.can_reset;$("exNoReset").hidden=!!d.can_reset;$("exNo").hidden=true;$("exDiff").textContent=em?"Use a different email":"Use a different number";$("exDiff").hidden=!!d.from_google;panel("exists")}
+function exLogin(){panel("login");$("lLogin").value=EX.value||"";$("lPass").focus()}
+async function exForgot(){panel("forgot");$("fgLogin").value=EX.value||"";await sendForgot()}
+function exDifferent(){panel("signup");setStep(2,true);const i=EX.field==="email"?$("sEmail"):$("sPhone");i.value="";i.focus();syncAlt()}
+async function exCancel(){if(EX&&EX.from_google){await api("/api/auth/google/cancel","POST",{});panel("login")}else{panel("signup")}}
+function openForgot(){panel("forgot");$("fgOn").hidden=!CFG.email;$("fgOff").hidden=CFG.email;$("fgDone").hidden=true;$("fgLogin").value=$("lLogin").value}
+async function sendForgot(){$("fgOn").hidden=!CFG.email;$("fgOff").hidden=CFG.email;if(!CFG.email)return;const v=$("fgLogin").value.trim();if(!v){toast("Enter your phone or email",true);return}
+ $("fgBtn").disabled=true;try{await api("/api/auth/forgot","POST",{login:v});$("fgOn").hidden=true;$("fgDone").hidden=false}catch(x){toast(x.message,true)}finally{$("fgBtn").disabled=false}}
+let RESET=null;
+async function doReset(e){e.preventDefault();if(!e.target.reportValidity())return;try{await api("/api/auth/reset","POST",{token:RESET,password:$("rsPass").value});toast("Password updated. Welcome back!");boot()}catch(x){toast(x.message,true)}}
+let GP=null;
+function gNameNext(e){e.preventDefault();if(!e.target.reportValidity())return;$("gName").hidden=true;$("gOnboard").hidden=false;$("gp2").classList.add("done");scrollTo({top:0,behavior:"smooth"})}
+function gBack(){$("gOnboard").hidden=true;$("gName").hidden=false;$("gp2").classList.remove("done")}
+async function gCancel(){await api("/api/auth/google/cancel","POST",{});panel("signup")}
+async function gComplete(e){e.preventDefault();const f=e.target;for(const el of f.querySelectorAll("input,select")){if(!el.checkValidity()){el.reportValidity();return}}
+ if(!phoneLooksValid($("goPhone").value)){toast("Please enter a complete phone number",true);return}
+ const b={...formObj(f),first_name:$("gFirst").value,last_name:$("gLast").value,marital_status:$("goMarried").checked?"married":"single",has_kids:$("goKids").checked};
+ if(!$("goMarried").checked)delete b.anniversary;$("goBtn").disabled=true;
+ try{await api("/api/auth/google/complete","POST",b);toast("Welcome to the family!");location.hash=b.has_kids||b.marital_status==="married"?"family":"profile";boot()}
+ catch(x){if(x.data&&x.data.code==="account_exists"){toast(x.message,true);const i=x.data.field==="email"?null:$("goPhone");if(i){i.focus();i.select()}}else toast(x.message,true)}finally{$("goBtn").disabled=false}}
+async function resendVerify(){$("vbBtn").disabled=true;try{await api("/api/me/verify/resend","POST",{});toast("Verification email sent");setTimeout(()=>$("vbBtn").disabled=false,60000)}catch(x){toast(x.message,true);$("vbBtn").disabled=false}}
 function namePreview(){const t=$("sTitle").value,f=$("sFirst").value.trim();$("preview").textContent=f?"Your cards will read: "+(t?t+" ":"")+f:""}
 $("sTitle").onchange=namePreview;$("sFirst").oninput=namePreview;
 async function loadCells(church,sel,wrap,current){const cells=await api("/api/public/cells?church_id="+church);$(wrap).hidden=!cells.length;
  $(sel).innerHTML='<option value="">I\\'m not in a cell</option>'+cells.map(c=>'<option value="'+c.id+'"'+(c.id===current?" selected":"")+">"+h(c.name)+"</option>").join("")}
-mountBday($("sBday"),{},true);
+mountBday($("sBday"),{},true);mountBday($("goBday"),{},true);
+const QS=new URLSearchParams(location.search);
+if(location.search)history.replaceState(null,"","/"+location.hash);
 async function boot(){
  try{ME=await api("/api/me")}catch(e){ME=null}
+ try{CFG=await api("/api/auth/config")}catch(e){}
  const bt=$("booting");if(bt)bt.remove();$("auth").hidden=!!ME;$("app").hidden=!ME;$("nav").hidden=!ME;$("topbar").hidden=!ME;
- if(!ME){const o=await api("/api/public/churches");$("sChurch").innerHTML=o.churches.length?o.churches.map(c=>'<option value="'+c.id+'">'+h(c.name)+"</option>").join(""):'<option value="">No churches yet</option>';
-  if(o.churches.length)loadCells(o.churches[0].id,"sCell","sCellWrap");return}
+ const v=QS.get("verified");if(v){toast(v==="1"?"Email confirmed. Thank you!":"That confirmation link is invalid or expired.",v!=="1");QS.delete("verified")}
+ if(!ME){const o=await api("/api/public/churches");const opts=o.churches.length?o.churches.map(c=>'<option value="'+c.id+'">'+h(c.name)+"</option>").join(""):'<option value="">No churches yet</option>';
+  $("sChurch").innerHTML=opts;$("goChurch").innerHTML=opts;
+  if(o.churches.length){loadCells(o.churches[0].id,"sCell","sCellWrap");loadCells(o.churches[0].id,"goCell","goCellWrap")}
+  panel(PANELS.find(p=>!$(p).hidden)||"signup");
+  const g=QS.get("google");QS.delete("google");
+  if(QS.get("reset")){RESET=QS.get("reset");QS.delete("reset");panel("reset");return}
+  if(g==="new"||g==="link"){const r=await api("/api/auth/google/pending");GP=r.pending;
+   if(GP&&GP.mode==="new"){$("gEmail").textContent=GP.email;$("gFirst").value=GP.given_name||"";$("gLast").value=GP.family_name||"";gBack();panel("gflow")}
+   else if(GP){showExists({field:"email",can_reset:r.can_reset,from_google:true},GP.email)}
+   else toast("Your Google sign-in expired. Please try again.",true)}
+  else if(g)toast({unavailable:"Google sign-in isn't available yet.",unverified:"Your Google email isn't verified.",inactive:"This account is inactive. Please contact your church admin."}[g]||"Google sign-in didn't complete. Please try again.",true);
+  return}
  render();show(location.hash.slice(1)||"profile");
 }
 async function refresh(){ME=await api("/api/me");render()}
 function render(){const p=ME.profile;
+ const needV=!!(p.email&&!p.email_verified&&ME.features&&ME.features.email);$("verifyBanner").hidden=!needV;if(needV)$("vbText").textContent="We sent a confirmation link to "+p.email+".";
+ $("pwGoogle").hidden=p.local_login;$("pwCur").hidden=!p.local_login;$("pwCur").required=p.local_login;
  $("hello").textContent="Hello, "+p.display_name;$("churchPill").textContent=p.church_name+(p.cell_name?" · "+p.cell_name:"");
  $("pTitle").value=p.title||"";$("pFirst").value=p.first_name||"";$("pLast").value=p.last_name||"";$("pPhone").value=p.phone?"+"+p.phone:"";$("pPhone2").value=p.phone_alt?"+"+p.phone_alt:"";document.querySelectorAll("#v-profile input[inputmode=tel]").forEach(opHint);$("pEmail").value=p.email||"";mountBday($("pBday"),p,true);
  $("pCellWrap").hidden=!ME.cells_enabled;$("pCell").innerHTML='<option value="">I\\'m not in a cell</option>'+ME.cells.map(c=>'<option value="'+c.id+'"'+(c.id===p.cell_id?" selected":"")+">"+h(c.name)+"</option>").join("");
@@ -164,16 +263,19 @@ function setStep(n,back){STEP=n;document.querySelectorAll("#signup .step").forEa
  const first=document.querySelector('#signup .step.on input:not([type=hidden]),#signup .step.on select');if(first&&n>1&&matchMedia("(min-width:600px)").matches)first.focus({preventScroll:true})}
 function stepValid(){for(const el of document.querySelectorAll("#signup .step.on input,#signup .step.on select")){if(!el.checkValidity()){el.reportValidity();return false}}
  if(STEP===2&&!phoneLooksValid($("sPhone").value)){toast("Please enter a complete phone number",true);return false}return true}
-function wiz(d){if(d>0&&!stepValid())return;if(d>0&&STEP===STEPS){$("signup").requestSubmit();return}setStep(Math.min(STEPS,Math.max(1,STEP+d)),d<0);scrollTo({top:0,behavior:"smooth"})}
+async function wiz(d){if(d>0&&!stepValid())return;
+ if(d>0&&STEP===2){try{await api("/api/auth/check","POST",{phone:$("sPhone").value,phone_alt:$("sPhone2").value,email:$("sEmail").value})}
+  catch(x){if(x.data&&x.data.code==="account_exists"){showExists(x.data,x.data.field==="email"?$("sEmail").value.trim():$("sPhone").value.trim());return}}}if(d>0&&STEP===STEPS){$("signup").requestSubmit();return}setStep(Math.min(STEPS,Math.max(1,STEP+d)),d<0);scrollTo({top:0,behavior:"smooth"})}
 async function doSignup(e){e.preventDefault();if(!stepValid())return;const btn=$("wNext");btn.disabled=true;btn.textContent="Creating…";
  try{await api("/api/auth/signup","POST",formObj(e.target));toast("Welcome to the family!");boot()}
- catch(x){toast(x.message,true);const m=x.message.toLowerCase();setStep(/phone|email|number/.test(m)?2:/birth|day|month|year/.test(m)?3:/name|title/.test(m)?1:STEP,true)}
+ catch(x){if(x.data&&x.data.code==="account_exists"){showExists(x.data,x.data.field==="email"?$("sEmail").value.trim():$("sPhone").value.trim());return}
+ toast(x.message,true);const m=x.message.toLowerCase();setStep(/phone|email|number/.test(m)?2:/birth|day|month|year/.test(m)?3:/name|title/.test(m)?1:STEP,true)}
  finally{btn.disabled=false;if(STEP===STEPS)btn.textContent="Create account"}}
 document.addEventListener("keydown",e=>{if(e.key==="Enter"&&e.target.closest&&e.target.closest("#signup")&&e.target.tagName==="INPUT"){e.preventDefault();wiz(1)}});
 setStep(1);
-async function doLogin(e){e.preventDefault();try{await api("/api/auth/login","POST",formObj(e.target));boot()}catch(x){toast(x.message,true)}}
+async function doLogin(e){e.preventDefault();try{const r=await api("/api/auth/login","POST",formObj(e.target));if(r.google_linked)toast("Google is now connected to your account");boot()}catch(x){toast(x.message,true)}}
 async function logout(){await api("/api/auth/logout","POST");location.hash="";boot()}
-async function patchMe(b,msg){try{await api("/api/me","PATCH",b);if(msg)toast(msg);await refresh()}catch(x){toast(x.message,true);refresh()}}
+async function patchMe(b,msg){try{const r=await api("/api/me","PATCH",b);if(r&&r.verification_sent)toast("Saved. Check your inbox to confirm your new email.");else if(msg)toast(msg);await refresh()}catch(x){toast(x.message,true);refresh()}}
 async function saveProfile(e){e.preventDefault();const b=formObj(e.target);if(!ME.cells_enabled)delete b.cell_id;patchMe(b,"Profile saved")}
 async function changePw(e){e.preventDefault();try{await api("/api/me/password","POST",formObj(e.target));e.target.reset();toast("Password changed")}catch(x){toast(x.message,true)}}
 async function setMarried(on){if(!on&&ME.relatives.some(r=>r.relation==="spouse")&&!confirm("This removes your spouse's details and photos. Continue?")){$("married").checked=true;return}
