@@ -19,7 +19,7 @@ const patch = (p: string, body: unknown) => call(p, { method: "PATCH", body });
 
 beforeAll(async () => {
   const out = await build({ entryPoints: ["src/index.ts"], bundle: true, format: "esm", write: false, platform: "neutral", target: "es2022" });
-  mf = new Miniflare({ modules: true, script: out.outputFiles[0].text, compatibilityDate: "2025-09-01", d1Databases: ["DB"], bindings: { ADMIN_TOKEN: TOKEN } });
+  mf = new Miniflare({ modules: true, script: out.outputFiles[0].text, compatibilityDate: "2025-09-01", d1Databases: ["DB"], r2Buckets: ["PHOTOS"], bindings: { ADMIN_TOKEN: TOKEN, SESSION_SECRET: "test-session-secret" } });
   const db = await mf.getD1Database("DB");
   for (const f of readdirSync("migrations").sort()) {
     const sql = readFileSync(`migrations/${f}`, "utf8").replace(/--.*$/gm, "");
@@ -97,7 +97,7 @@ describe("church membership app", () => {
     const ok = await put(ids.cell1);
     expect(ok.status).toBe(200); expect(ok.json.cell).toEqual({ id: ids.cell1, name: "Cell Alpha" });
     expect((await put(null)).json.cell).toBeNull();
-    const form = await mf.dispatchFetch(`http://x/m/${code}`, { method: "POST", body: new URLSearchParams({ cell_id: String(ids.cell1) }) });
+    const form = await mf.dispatchFetch(`http://x/m/${code}`, { method: "POST", body: new URLSearchParams({ cell_id: String(ids.cell1) }) as any });
     expect(form.status).toBe(200);
     expect((await call(`/api/admin/members/${ids.m1}`)).json.cell_id).toBe(ids.cell1);
     expect((await call(`/api/member/nope`, { auth: null })).status).toBe(404);
@@ -143,8 +143,139 @@ describe("church membership app", () => {
     expect((await call(`/api/admin/members/${ids.m1}`)).status).toBe(404);
   });
 
-  it("serves the admin UI and home page", async () => {
-    expect((await call("/admin")).text).toContain("CE Admin");
-    expect((await call("/", { auth: null })).status).toBe(200);
+  it("serves the admin UI", async () => {
+    expect((await call("/admin")).text).toContain("Celebrations");
+  });
+});
+
+describe("accounts, family, photos, celebrations", () => {
+  let cookie = "", church = 0, mainCell = 0;
+  const me = async (path: string, init: { method?: string; body?: unknown; form?: FormData; ck?: string } = {}) => {
+    const headers: Record<string, string> = { cookie: init.ck ?? cookie };
+    if (init.body !== undefined) headers["content-type"] = "application/json";
+    let payload: any = init.body !== undefined ? JSON.stringify(init.body) : undefined;
+    if (init.form) { // serialise multipart with Node's own Request, then hand raw bytes to Miniflare
+      const req = new Request("http://x", { method: "POST", body: init.form });
+      headers["content-type"] = req.headers.get("content-type")!;
+      payload = new Uint8Array(await req.arrayBuffer());
+    }
+    const r = await mf.dispatchFetch(`http://x${path}`, { method: init.method ?? "GET", headers, body: payload });
+    const sc = r.headers.get("set-cookie"); if (sc && sc.startsWith("ce_session=")) cookie = sc.split(";")[0];
+    const text = await r.text(); let json: any = null; try { json = JSON.parse(text); } catch { /* */ }
+    return { status: r.status, json, text, headers: r.headers };
+  };
+  const png = () => new File([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3])], "p.png", { type: "image/png" });
+  const signup = { title: "Brother", first_name: "John", last_name: "Okello", phone: "0772 123456", email: "john@example.com", dob: "1990-10-12", password: "s3cret-pass" };
+
+  it("lists public churches and cells (id+name only)", async () => {
+    const r = await call("/api/public/churches", { auth: null });
+    church = r.json.churches.find((c: any) => c.name === "CE Entebbe").id;
+    expect(Object.keys(r.json.churches[0]).sort()).toEqual(["id", "name"]);
+    const cells = await call(`/api/public/cells?church_id=${church}`, { auth: null });
+    mainCell = cells.json[0].id;
+    expect(Object.keys(cells.json[0]).sort()).toEqual(["id", "name"]);
+  });
+
+  it("signs up with validation, normalised phone and duplicate protection", async () => {
+    expect((await me("/api/auth/signup", { method: "POST", body: { ...signup, church_id: church, password: "short" } })).status).toBe(400);
+    expect((await me("/api/auth/signup", { method: "POST", body: { ...signup, church_id: church, dob: "" } })).status).toBe(400);
+    expect((await me("/api/auth/signup", { method: "POST", body: { ...signup, church_id: church, dob: "2999-01-01" } })).status).toBe(400);
+    const r = await me("/api/auth/signup", { method: "POST", body: { ...signup, church_id: church, cell_id: mainCell } });
+    expect(r.status).toBe(201);
+    expect(r.headers.get("set-cookie")).toMatch(/HttpOnly/i);
+    const dup = await me("/api/auth/signup", { method: "POST", body: { ...signup, email: "x@y.com", phone: "+256772123456", church_id: church }, ck: "" });
+    expect(dup.status).toBe(409);
+    const prof = await me("/api/me");
+    expect(prof.json.profile).toMatchObject({ display_name: "Brother John", phone: "256772123456", marital_status: "single", cell_id: mainCell });
+    expect(prof.text).not.toMatch(/password|pcf/i);
+  });
+
+  it("logs in by phone or email, rejects bad passwords and forged cookies", async () => {
+    const saved = cookie;
+    expect((await me("/api/auth/login", { method: "POST", body: { login: "0772123456", password: "nope" }, ck: "" })).status).toBe(401);
+    expect((await me("/api/auth/login", { method: "POST", body: { login: "JOHN@example.com", password: signup.password }, ck: "" })).status).toBe(200);
+    expect((await me("/api/auth/login", { method: "POST", body: { login: "0772123456", password: signup.password }, ck: "" })).status).toBe(200);
+    expect((await me("/api/me", { ck: "ce_session=1.9999999999.abc.forged" })).status).toBe(401);
+    expect((await me("/api/me", { ck: "" })).status).toBe(401);
+    expect((await me("/api/me", { ck: saved })).status).toBe(200);
+  });
+
+  it("manages marriage, spouse, anniversary and kids", async () => {
+    expect((await me("/api/me/relatives", { method: "POST", body: { relation: "spouse", first_name: "Mary" } })).status).toBe(400); // not married yet
+    await me("/api/me", { method: "PATCH", body: { marital_status: "married", anniversary: "2015-10-14" } });
+    const sp = await me("/api/me/relatives", { method: "POST", body: { relation: "spouse", title: "Sister", first_name: "Mary", dob: "1992-10-11" } });
+    expect(sp.status).toBe(201);
+    expect((await me("/api/me/relatives", { method: "POST", body: { relation: "spouse", first_name: "Other" } })).status).toBe(409);
+    const kid = await me("/api/me/relatives", { method: "POST", body: { relation: "child", title: "Brother", first_name: "Tim", dob: "2018-10-13" } });
+    expect(kid.json.title).toBeNull(); // children have no title
+    const p = await me("/api/me");
+    expect(p.json.profile).toMatchObject({ marital_status: "married", anniversary: "2015-10-14", has_kids: true });
+    expect(p.json.relatives).toHaveLength(2);
+  });
+
+  it("uploads photos into the approval queue; only the owner can view them", async () => {
+    const spouseId = (await me("/api/me")).json.relatives.find((r: any) => r.relation === "spouse").id;
+    const fd = new FormData(); fd.append("photo", png());
+    const up = await me("/api/me/photos", { method: "POST", form: fd });
+    expect(up.status).toBe(201); expect(up.json.status).toBe("pending");
+    const fd2 = new FormData(); fd2.append("photo", png()); fd2.append("relative_id", String(spouseId));
+    expect((await me("/api/me/photos", { method: "POST", form: fd2 })).status).toBe(201);
+    const bad = new FormData(); bad.append("photo", new File(["hi"], "a.txt", { type: "text/plain" }));
+    expect((await me("/api/me/photos", { method: "POST", form: bad })).status).toBe(400);
+    const img = await me(`/api/me/photos/${up.json.id}`);
+    expect(img.status).toBe(200); expect(img.headers.get("content-type")).toBe("image/png");
+    expect((await me(`/api/me/photos/${up.json.id}`, { ck: "" })).status).toBe(401);
+    const q = await call("/api/admin/photos?status=pending");
+    expect(q.json.length).toBe(2);
+    expect((await call(`/api/admin/photos/${up.json.id}`, { method: "PATCH", body: { status: "approved" } })).json.status).toBe("approved");
+    expect((await call(`/api/admin/photos/${up.json.id}/image`)).status).toBe(200);
+    expect((await call("/api/admin/photos?status=pending")).json.length).toBe(1);
+  });
+
+  it("builds the celebrations dashboard incl. spouses, kids and anniversaries", async () => {
+    const r = (range: string) => call(`/api/admin/celebrations?range=${range}&today=2026-10-10&church_id=${church}`);
+    const week = (await r("week")).json.items;
+    const john = week.find((i: any) => i.display_name === "Brother John");
+    expect(john).toMatchObject({ type: "birthday", date: "2026-10-12", days: 2 });
+    expect(john.photo_ids.length).toBe(1); // only approved photos
+    expect(week.find((i: any) => i.display_name === "Sister Mary")).toMatchObject({ who: "spouse", date: "2026-10-11", context: "Spouse of Brother John" });
+    expect(week.find((i: any) => i.display_name === "Tim")).toMatchObject({ who: "child", date: "2026-10-13" });
+    expect(week.find((i: any) => i.type === "anniversary")).toMatchObject({ display_name: "Brother John & Sister Mary", years: 11, date: "2026-10-14" });
+    expect((await r("today")).json.items).toHaveLength(0);
+    expect((await call("/api/admin/celebrations?range=month&today=2026-10-20")).json.items.length).toBeGreaterThanOrEqual(4);
+    expect((await call("/api/admin/celebrations?range=week&today=2026-11-01")).json.items).toHaveLength(0);
+  });
+
+  it("going single removes spouse and anniversary", async () => {
+    await me("/api/me", { method: "PATCH", body: { marital_status: "single" } });
+    const p = await me("/api/me");
+    expect(p.json.profile.anniversary).toBeNull();
+    expect(p.json.relatives.map((r: any) => r.relation)).toEqual(["child"]);
+    expect(p.json.photos).toHaveLength(1);
+  });
+
+  it("password change invalidates old sessions; logout clears cookie", async () => {
+    const old = cookie;
+    expect((await me("/api/me/password", { method: "POST", body: { current: "wrong", password: "another-pass" } })).status).toBe(400);
+    expect((await me("/api/me/password", { method: "POST", body: { current: signup.password, password: "another-pass" } })).status).toBe(200);
+    expect((await me("/api/me", { ck: old })).status).toBe(401);
+    expect((await me("/api/me")).status).toBe(200);
+    const lo = await me("/api/auth/logout", { method: "POST" });
+    expect(lo.headers.get("set-cookie")).toMatch(/Max-Age=0/);
+  });
+
+  it("admin sees family and photos but never password hashes", async () => {
+    const list = await call(`/api/admin/members?church_id=${church}`);
+    expect(list.text).not.toContain("pbkdf2");
+    const john = list.json.find((m: any) => m.first_name === "John");
+    expect(john.has_account).toBe(1);
+    const d = await call(`/api/admin/members/${john.id}`);
+    expect(d.json.relatives).toHaveLength(1); expect(d.json.photos.length).toBe(1);
+    expect(d.text).not.toContain("pbkdf2");
+  });
+
+  it("serves the account page at /", async () => {
+    const r = await call("/", { auth: null });
+    expect(r.text).toContain("Create account");
   });
 });
